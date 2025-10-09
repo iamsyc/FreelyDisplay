@@ -1,0 +1,56 @@
+//
+//  VirtualDisplay.swift
+//  FreelyDisplay
+//
+//  Created by Phineas Guo on 2025/10/4.
+//
+
+import SwiftUI
+
+struct VirtualDisplayView: View {
+    @EnvironmentObject var appHelper:AppHelper
+    @State var creatView=false
+    var body: some View {
+        Group{
+            if !appHelper.displays.isEmpty{
+                List(appHelper.displays,id: \.self){display in
+                    HStack(alignment:.center){
+                        Image(systemName: "display")
+                            .font(.system(size: 30))
+                        VStack(alignment: .leading){
+                            Text(String(display.name))
+        //                                .font(.title3)
+                                .font(.headline)
+                            Text(String(display.serialNum))
+                                
+                                .font(.subheadline)
+                        }
+                        Spacer()
+                        HStack{
+                            Button("Destroy",action:{
+                                appHelper.displays.removeAll { CGVirtualDisplay in
+                                    CGVirtualDisplay == display
+                                }
+                                appHelper.id=UUID()
+                            })
+                        }
+                    }
+                    .id(appHelper.id)
+                }
+            }else{
+                Text("")
+            }
+        }
+        
+        .sheet(isPresented: $creatView, content: {creatVirtualDisplay(isShow: $creatView)})
+        .toolbar{
+            Button("Add Virtual Display", systemImage: "plus",action:{
+                creatView=true
+            })
+        }
+    }
+}
+
+#Preview {
+    VirtualDisplayView()
+}

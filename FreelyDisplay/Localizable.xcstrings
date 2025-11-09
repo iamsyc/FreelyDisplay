@@ -227,12 +227,12 @@
         }
       }
     },
-    "Please [go to the settings app](%@) to adjust the monitor settings." : {
+    "Please [go to the settings app](x-apple.systempreferences:com.apple.preference.displays) to adjust the monitor settings." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "更多显示器设置请 [前往设置App](%@) 调整"
+            "value" : "更多显示器设置请[前往设置App](x-apple.systempreferences:com.apple.preference.displays)调整"
           }
         }
       }

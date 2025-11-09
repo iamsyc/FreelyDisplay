@@ -40,7 +40,7 @@ struct DisplaysView: View {
         }
         .safeAreaInset(edge: .bottom, content: {
             HStack{
-                Text("Please [go to the settings app](\(String("x-apple.systempreferences:com.apple.preference.displays"))) to adjust the monitor settings.")
+                Text("Please [go to the settings app](x-apple.systempreferences:com.apple.preference.displays) to adjust the monitor settings.")
                     .font(.footnote)
                 
             }

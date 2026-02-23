@@ -400,7 +400,7 @@ final class VirtualDisplayService {
                 AppLog.virtualDisplay.notice(
                     "Aggressive enable preemptively using coordinated fleet rebuild before creating target (config: \(config.id.uuidString, privacy: .public), serial: \(config.serialNum, privacy: .public), runningManagedCount: \(self.runningConfigIds.count, privacy: .public), desiredManagedEnabledCount: \(desiredManagedEnabledCount, privacy: .public))."
                 )
-                try await rebuildManagedDisplayFleet(
+                try await rebuildCoordinator.rebuildManagedDisplayFleet(
                     prioritizing: configId,
                     fallbackPreferredMainDisplayID: preferredMainDisplayID,
                     teardownStrategy: .fleetOfflineOnly,
@@ -442,13 +442,13 @@ final class VirtualDisplayService {
                     AppLog.virtualDisplay.notice(
                         "Aggressive enable escalating to coordinated fleet rebuild because prior termination callback was not observed (config: \(config.id.uuidString, privacy: .public), serial: \(config.serialNum, privacy: .public), runningManagedCount: \(self.runningConfigIds.count, privacy: .public))."
                     )
-                    try await rebuildManagedDisplayFleet(
+                    try await rebuildCoordinator.rebuildManagedDisplayFleet(
                         prioritizing: configId,
                         fallbackPreferredMainDisplayID: preferredMainDisplayID,
                         teardownStrategy: .fleetOfflineOnly
                     )
                 } else {
-                    try await ensureHealthyTopologyAfterEnable(
+                    try await rebuildCoordinator.ensureHealthyTopologyAfterEnable(
                         preferredMainDisplayID: preferredMainDisplayID,
                         recoveryMode: recoveryMode
                     )
@@ -581,170 +581,6 @@ final class VirtualDisplayService {
         return next
     }
 
-    private func shouldUseCoordinatedRebuild(
-        configId: UUID,
-        config: VirtualDisplayConfig,
-        snapshot: DisplayTopologySnapshot?
-    ) -> Bool {
-        guard runningConfigIds.contains(configId),
-              runningConfigIds.count >= 2 else {
-            return false
-        }
-        if let runtimeDisplayID = runtimeDisplayID(for: configId),
-           runtimeDisplayID == CGMainDisplayID() {
-            return true
-        }
-        guard let snapshot else {
-            return false
-        }
-        let managedOnlineCount = snapshot.displays.filter(\.isManagedVirtualDisplay).count
-        guard managedOnlineCount >= 2,
-              let targetDisplayID = TopologyHealthEvaluator.managedDisplayID(
-                for: config.serialNum,
-                snapshot: snapshot
-              ) else {
-            return false
-        }
-        return snapshot.mainDisplayID == targetDisplayID
-    }
-
-    private func orderedRunningConfigIDs(prioritizing configId: UUID) -> [UUID] {
-        var ordered = displayConfigs
-            .map(\.id)
-            .filter { runningConfigIds.contains($0) }
-        if let index = ordered.firstIndex(of: configId) {
-            ordered.remove(at: index)
-            ordered.insert(configId, at: 0)
-        } else if runningConfigIds.contains(configId) {
-            ordered.insert(configId, at: 0)
-        }
-        return ordered
-    }
-
-    private func rebuildManagedDisplayFleet(
-        prioritizing prioritizedConfigID: UUID,
-        fallbackPreferredMainDisplayID: CGDirectDisplayID?,
-        teardownStrategy: FleetRebuildTeardownStrategy = .perDisplaySettlement,
-        includePrioritizedConfigIfNotRunning: Bool = false
-    ) async throws {
-        var orderedConfigIDs = orderedRunningConfigIDs(prioritizing: prioritizedConfigID)
-        if includePrioritizedConfigIfNotRunning,
-           !orderedConfigIDs.contains(prioritizedConfigID),
-           displayConfigs.contains(where: { $0.id == prioritizedConfigID }) {
-            orderedConfigIDs.insert(prioritizedConfigID, at: 0)
-        }
-        guard !orderedConfigIDs.isEmpty else {
-            throw VirtualDisplayError.configNotFound
-        }
-
-        var terminationConfirmedByConfigID: [UUID: Bool] = [:]
-        var rebuiltSerials: [UInt32] = []
-        for runningConfigID in orderedConfigIDs {
-            guard let runningConfig = displayConfigs.first(where: { $0.id == runningConfigID }) else { continue }
-            rebuiltSerials.append(runningConfig.serialNum)
-
-            let runtimeSerialNum = activeDisplaysByConfigId[runningConfigID]?.serialNum ?? runningConfig.serialNum
-            let generationToWaitFor = runtimeGenerationByConfigId[runningConfigID]
-
-            activeDisplaysByConfigId[runningConfigID] = nil
-            runtimeDisplayIDHintsByConfigId[runningConfigID] = nil
-            runningConfigIds.remove(runningConfigID)
-            displays.removeAll { $0.serialNum == runtimeSerialNum }
-
-            let terminationConfirmed: Bool
-            switch teardownStrategy {
-            case .perDisplaySettlement:
-                terminationConfirmed = try await teardownCoordinator.settleRebuildTeardown(
-                    configId: runningConfigID,
-                    serialNum: runningConfig.serialNum,
-                    generationToWaitFor: generationToWaitFor,
-                    rebuildTerminationTimeout: Self.rebuildTerminationTimeout,
-                    rebuildOfflineTimeout: Self.rebuildOfflineTimeout,
-                    rebuildFinalOfflineConfirmationTimeout: Self.rebuildFinalOfflineConfirmationTimeout
-                )
-            case .fleetOfflineOnly:
-                terminationConfirmed = false
-                AppLog.virtualDisplay.debug(
-                    "Fleet rebuild skipping per-display teardown settlement; relying on fleet offline confirmation (config: \(runningConfigID.uuidString, privacy: .public), serial: \(runningConfig.serialNum, privacy: .public), generation: \(String(describing: generationToWaitFor), privacy: .public))."
-                )
-            }
-            terminationConfirmedByConfigID[runningConfigID] = terminationConfirmed
-        }
-        let fleetOfflineConfirmed = await teardownCoordinator.waitForManagedDisplaysOffline(
-            serialNumbers: rebuiltSerials,
-            timeout: Self.rebuildFinalOfflineConfirmationTimeout
-        )
-        if !fleetOfflineConfirmed {
-            AppLog.virtualDisplay.error(
-                "Coordinated rebuild aborted because at least one managed display remained online after fleet teardown (configs: \(orderedConfigIDs.map(\.uuidString).joined(separator: ","), privacy: .public))."
-            )
-            throw VirtualDisplayError.teardownTimedOut
-        }
-        let fleetCreationCooldown: TimeInterval
-        switch teardownStrategy {
-        case .perDisplaySettlement:
-            fleetCreationCooldown = Self.rebuildFleetCreationCooldown
-        case .fleetOfflineOnly:
-            fleetCreationCooldown = Self.rebuildFleetCreationCooldownFastTeardown
-        }
-        if fleetCreationCooldown > 0 {
-            let cooldown = await waitForAdaptiveManagedDisplayCooldown(
-                serialNumbers: rebuiltSerials,
-                maxCooldown: fleetCreationCooldown
-            )
-            AppLog.virtualDisplay.debug(
-                "Fleet rebuild creation cooldown (strategy: \(teardownStrategy.logDescription, privacy: .public), maxCooldownSec: \(fleetCreationCooldown, privacy: .public), waitedMs: \(UInt64(cooldown.waitedSeconds * 1000), privacy: .public), earlyExit: \(cooldown.completedEarly, privacy: .public))."
-            )
-        }
-
-        var recreatedPreferredMainDisplayID: CGDirectDisplayID?
-        for runningConfigID in orderedConfigIDs {
-            guard let runningConfig = displayConfigs.first(where: { $0.id == runningConfigID }) else { continue }
-            let terminationConfirmed = terminationConfirmedByConfigID[runningConfigID] ?? true
-
-            let recreatedDisplayID = try await recreateRuntimeDisplayForRebuild(
-                config: runningConfig,
-                terminationConfirmed: terminationConfirmed
-            )
-            if runningConfigID == prioritizedConfigID {
-                recreatedPreferredMainDisplayID = recreatedDisplayID
-            }
-        }
-
-        try await ensureHealthyTopologyAfterEnable(
-            preferredMainDisplayID: recreatedPreferredMainDisplayID ?? fallbackPreferredMainDisplayID
-        )
-    }
-
-    private func recreateRuntimeDisplayForRebuild(
-        config: VirtualDisplayConfig,
-        terminationConfirmed: Bool
-    ) async throws -> CGDirectDisplayID? {
-        if let rebuildRuntimeDisplayHook {
-            try await rebuildRuntimeDisplayHook(config, terminationConfirmed)
-            return runtimeDisplayID(for: config.id)
-        }
-        let rebuiltDisplay = try await createRuntimeDisplayWithRetries(
-            from: config,
-            terminationConfirmed: terminationConfirmed
-        )
-        return rebuiltDisplay.displayID
-    }
-
-    private enum FleetRebuildTeardownStrategy {
-        case perDisplaySettlement
-        case fleetOfflineOnly
-
-        var logDescription: String {
-            switch self {
-            case .perDisplaySettlement:
-                return "perDisplaySettlement"
-            case .fleetOfflineOnly:
-                return "fleetOfflineOnly"
-            }
-        }
-    }
-
     func ensureHealthyTopologyAfterEnable(
         preferredMainDisplayID: CGDirectDisplayID? = nil,
         recoveryMode: TopologyRecoveryMode = .aggressive
@@ -753,211 +589,6 @@ final class VirtualDisplayService {
             preferredMainDisplayID: preferredMainDisplayID,
             recoveryMode: recoveryMode
         )
-    }
-
-    private func repairTopologyIfNeeded(
-        snapshot: DisplayTopologySnapshot,
-        desiredManagedSerials: Set<UInt32>,
-        preferredMainDisplayID: CGDirectDisplayID?,
-        allowForceNormalization: Bool
-    ) async throws -> Bool {
-        let evaluation = TopologyHealthEvaluator.evaluate(
-            snapshot: snapshot,
-            desiredManagedSerials: desiredManagedSerials
-        )
-        AppLog.virtualDisplay.debug(
-            "Topology evaluation (allowForceNormalization: \(allowForceNormalization, privacy: .public), issue: \(self.describe(issue: evaluation.issue), privacy: .public), needsRepair: \(evaluation.needsRepair, privacy: .public), forceNormalization: \(evaluation.forceNormalization, privacy: .public), managedIDs: \(evaluation.managedDisplayIDs.map(String.init).joined(separator: ","), privacy: .public))."
-        )
-        logTopologySnapshot("topologyRecovery:evaluationSnapshot", snapshot: snapshot)
-        let continuityAnchorDisplayID = preferredMainDisplayID.flatMap { preferredMain in
-            TopologyHealthEvaluator.shouldEnforceMainContinuity(
-                preferredMainDisplayID: preferredMain,
-                snapshot: snapshot,
-                managedDisplayIDs: evaluation.managedDisplayIDs
-            ) ? preferredMain : nil
-        }
-        let shouldRepairForForceNormalization = allowForceNormalization &&
-            evaluation.forceNormalization &&
-            evaluation.issue != nil
-        let shouldRepair = evaluation.needsRepair || shouldRepairForForceNormalization
-        let shouldRepairForContinuity = continuityAnchorDisplayID != nil
-        if allowForceNormalization,
-           evaluation.forceNormalization,
-           evaluation.issue == nil,
-           continuityAnchorDisplayID == nil {
-            AppLog.virtualDisplay.debug(
-                "Topology force normalization skipped because topology is already stable and no continuity repair is needed."
-            )
-        }
-        guard shouldRepair || shouldRepairForContinuity else {
-            AppLog.virtualDisplay.debug("Topology evaluation decided no repair.")
-            return false
-        }
-        if !shouldRepair, let continuityAnchorDisplayID {
-            AppLog.virtualDisplay.notice(
-                "Topology continuity repair requested (anchor: \(continuityAnchorDisplayID, privacy: .public), preferredMain: \(String(describing: preferredMainDisplayID), privacy: .public))."
-            )
-            let continuityRepaired = topologyRepairer.repair(
-                snapshot: snapshot,
-                managedDisplayIDs: evaluation.managedDisplayIDs,
-                anchorDisplayID: continuityAnchorDisplayID
-            )
-            guard continuityRepaired else {
-                throw VirtualDisplayError.topologyRepairFailed
-            }
-            guard let stabilizedAfterContinuity = await waitForStableTopology() else {
-                throw VirtualDisplayError.topologyUnstableAfterEnable
-            }
-            logTopologySnapshot("topologyRecovery:postContinuityStable", snapshot: stabilizedAfterContinuity)
-            return true
-        }
-        let repairAnchorDisplayID = TopologyHealthEvaluator.selectRepairAnchorDisplayID(
-            snapshot: snapshot,
-            managedDisplayIDs: evaluation.managedDisplayIDs,
-            preferredMainDisplayID: preferredMainDisplayID
-        )
-        AppLog.virtualDisplay.notice(
-            "Topology repair requested (anchor: \(repairAnchorDisplayID, privacy: .public), preferredMain: \(String(describing: preferredMainDisplayID), privacy: .public), issue: \(self.describe(issue: evaluation.issue), privacy: .public), forceNormalization: \(evaluation.forceNormalization, privacy: .public))."
-        )
-
-        let repaired = topologyRepairer.repair(
-            snapshot: snapshot,
-            managedDisplayIDs: evaluation.managedDisplayIDs,
-            anchorDisplayID: repairAnchorDisplayID
-        )
-        guard repaired else {
-            throw VirtualDisplayError.topologyRepairFailed
-        }
-
-        guard let stabilizedAfterRepair = await waitForStableTopology() else {
-            throw VirtualDisplayError.topologyUnstableAfterEnable
-        }
-        logTopologySnapshot("topologyRecovery:postRepairStable", snapshot: stabilizedAfterRepair)
-
-        let postRepairEvaluation = TopologyHealthEvaluator.evaluate(
-            snapshot: stabilizedAfterRepair,
-            desiredManagedSerials: desiredManagedSerials
-        )
-        guard !postRepairEvaluation.needsRepair else {
-            AppLog.virtualDisplay.error(
-                "Topology repair did not clear primary issue (issue: \(self.describe(issue: postRepairEvaluation.issue), privacy: .public))."
-            )
-            throw VirtualDisplayError.topologyRepairFailed
-        }
-
-        if allowForceNormalization && evaluation.forceNormalization {
-            let normalizationAnchorDisplayID = TopologyHealthEvaluator.selectRepairAnchorDisplayID(
-                snapshot: stabilizedAfterRepair,
-                managedDisplayIDs: postRepairEvaluation.managedDisplayIDs,
-                preferredMainDisplayID: preferredMainDisplayID
-            )
-            let normalized = topologyRepairer.repair(
-                snapshot: stabilizedAfterRepair,
-                managedDisplayIDs: postRepairEvaluation.managedDisplayIDs,
-                anchorDisplayID: normalizationAnchorDisplayID
-            )
-            guard normalized else {
-                throw VirtualDisplayError.topologyRepairFailed
-            }
-            guard let stabilizedAfterNormalization = await waitForStableTopology() else {
-                throw VirtualDisplayError.topologyUnstableAfterEnable
-            }
-            logTopologySnapshot("topologyRecovery:postNormalizationStable", snapshot: stabilizedAfterNormalization)
-            let postNormalizationEvaluation = TopologyHealthEvaluator.evaluate(
-                snapshot: stabilizedAfterNormalization,
-                desiredManagedSerials: desiredManagedSerials
-            )
-            guard !postNormalizationEvaluation.needsRepair else {
-                AppLog.virtualDisplay.error(
-                    "Topology normalization did not clear issue (issue: \(self.describe(issue: postNormalizationEvaluation.issue), privacy: .public))."
-                )
-                throw VirtualDisplayError.topologyRepairFailed
-            }
-            if let continuityMainDisplayID = preferredMainDisplayID,
-               TopologyHealthEvaluator.shouldEnforceMainContinuity(
-                   preferredMainDisplayID: continuityMainDisplayID,
-                   snapshot: stabilizedAfterNormalization,
-                   managedDisplayIDs: postNormalizationEvaluation.managedDisplayIDs
-               ) {
-                let continuityRepaired = topologyRepairer.repair(
-                    snapshot: stabilizedAfterNormalization,
-                    managedDisplayIDs: postNormalizationEvaluation.managedDisplayIDs,
-                    anchorDisplayID: continuityMainDisplayID
-                )
-                guard continuityRepaired else {
-                    throw VirtualDisplayError.topologyRepairFailed
-                }
-                guard let stabilizedAfterContinuity = await waitForStableTopology() else {
-                    throw VirtualDisplayError.topologyUnstableAfterEnable
-                }
-                logTopologySnapshot("topologyRecovery:postContinuityStable", snapshot: stabilizedAfterContinuity)
-            }
-            return true
-        }
-        return true
-    }
-
-    private func waitForStableTopology(
-        requiredStableSamples: Int = 3,
-        minimumTimeout: TimeInterval = 0.35
-    ) async -> DisplayTopologySnapshot? {
-        let effectiveTimeout = max(topologyStabilityTimeout, minimumTimeout)
-        let deadline = Date().addingTimeInterval(effectiveTimeout)
-        var previousSnapshot: DisplayTopologySnapshot?
-        var stableSampleCount = 0
-        let targetStableSamples = max(requiredStableSamples, 1)
-        let basePollInterval = max(topologyStabilityPollInterval, 0.001)
-        let fastProbeInterval = min(
-            basePollInterval,
-            max(Self.adaptiveCooldownPollIntervalFloor, basePollInterval / Self.topologyStabilityAdaptiveProbeDivisor)
-        )
-        var currentPollInterval = fastProbeInterval
-
-        while Date() < deadline {
-            guard let currentSnapshot = currentTopologySnapshot() else {
-                stableSampleCount = 0
-                currentPollInterval = min(basePollInterval, max(fastProbeInterval, currentPollInterval))
-                await sleepForRetry(seconds: currentPollInterval)
-                continue
-            }
-
-            if previousSnapshot == nil {
-                previousSnapshot = currentSnapshot
-                stableSampleCount = 1
-                // For fast mode (targetStableSamples == 1) return immediately on first valid snapshot
-                if targetStableSamples == 1 {
-                    return currentSnapshot
-                }
-                await sleepForRetry(seconds: fastProbeInterval)
-                continue
-            }
-
-            if previousSnapshot == currentSnapshot {
-                stableSampleCount += 1
-                currentPollInterval = min(
-                    basePollInterval,
-                    max(
-                        fastProbeInterval,
-                        currentPollInterval * Self.topologyStabilityAdaptiveBackoffMultiplier
-                    )
-                )
-            } else {
-                previousSnapshot = currentSnapshot
-                stableSampleCount = 1
-                currentPollInterval = fastProbeInterval
-                // For fast mode (targetStableSamples == 1) return as soon as we observe a snapshot
-                if targetStableSamples == 1 {
-                    return currentSnapshot
-                }
-            }
-
-            if stableSampleCount >= targetStableSamples {
-                return currentSnapshot
-            }
-            await sleepForRetry(seconds: currentPollInterval)
-        }
-
-        return nil
     }
 
     func rollbackEnableRuntimeState(configId: UUID, serialNum: UInt32) {
@@ -1286,18 +917,6 @@ final class VirtualDisplayService {
             ].joined(separator: "/")
         }
         return "main=\(snapshot.mainDisplayID) displays=[\(displaysDescription.joined(separator: ", "))]"
-    }
-
-    private func describe(issue: TopologyHealthEvaluation.Issue?) -> String {
-        guard let issue else { return "none" }
-        switch issue {
-        case .managedDisplaysCollapsedIntoSingleMirrorSet:
-            return "mirrorCollapse"
-        case .managedDisplaysOverlappingInExtendedSpace:
-            return "overlap"
-        case .mainDisplayOutsideManagedSetWithoutPhysicalFallback:
-            return "mainOutsideManagedNoPhysical"
-        }
     }
 
     isolated deinit {

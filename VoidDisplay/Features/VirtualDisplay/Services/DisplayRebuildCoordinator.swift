@@ -127,7 +127,7 @@ final class DisplayRebuildCoordinator {
         return ordered
     }
 
-    private func rebuildManagedDisplayFleet(
+    func rebuildManagedDisplayFleet(
         prioritizing prioritizedConfigID: UUID,
         fallbackPreferredMainDisplayID: CGDirectDisplayID?,
         teardownStrategy: FleetRebuildTeardownStrategy = .perDisplaySettlement,
@@ -399,9 +399,9 @@ final class DisplayRebuildCoordinator {
             desiredManagedSerials: desiredManagedSerials
         )
         guard !postRepairEvaluation.needsRepair else {
-        AppLog.virtualDisplay.error(
-            "Topology repair did not clear primary issue (issue: \(self.describe(issue: postRepairEvaluation.issue)))."
-        )
+            AppLog.virtualDisplay.error(
+                "Topology repair did not clear primary issue (issue: \(self.describe(issue: postRepairEvaluation.issue)))."
+            )
             throw VirtualDisplayService.VirtualDisplayError.topologyRepairFailed
         }
 
@@ -428,9 +428,9 @@ final class DisplayRebuildCoordinator {
                 desiredManagedSerials: desiredManagedSerials
             )
             guard !postNormalizationEvaluation.needsRepair else {
-            AppLog.virtualDisplay.error(
-                "Topology normalization did not clear issue (issue: \(self.describe(issue: postNormalizationEvaluation.issue)))."
-            )
+                AppLog.virtualDisplay.error(
+                    "Topology normalization did not clear issue (issue: \(self.describe(issue: postNormalizationEvaluation.issue)))."
+                )
                 throw VirtualDisplayService.VirtualDisplayError.topologyRepairFailed
             }
             if let continuityMainDisplayID = preferredMainDisplayID,

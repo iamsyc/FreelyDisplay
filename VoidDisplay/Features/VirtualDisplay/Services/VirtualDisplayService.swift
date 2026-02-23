@@ -4,22 +4,22 @@ import OSLog
 
 @MainActor
 final class VirtualDisplayService {
-    private static let managedVendorID: UInt32 = 0x3456
-    private static let managedProductID: UInt32 = 0x1234
-    private static let rollbackOfflineWaitTimeout: TimeInterval = 1.2
-    private static let rebuildTerminationTimeout: TimeInterval = 2.0
-    private static let rebuildOfflineTimeout: TimeInterval = 4.0
-    private static let rebuildFinalOfflineConfirmationTimeout: TimeInterval = 0.8
-    private static let rebuildFleetCreationCooldown: TimeInterval = 0.6
-    private static let rebuildFleetCreationCooldownFastTeardown: TimeInterval = 0.15
-    private static let deferredTopologyRecheckMinimumDelay: TimeInterval = 0.03
-    private static let deferredTopologyRecheckMultiplier: TimeInterval = 1.5
-    private static let aggressiveEnableUnsettledTeardownCooldown: TimeInterval = 0.35
-    private static let adaptiveCooldownPollIntervalFloor: TimeInterval = 0.01
-    private static let adaptiveCooldownPollIntervalCeiling: TimeInterval = 0.05
-    private static let adaptiveCooldownStableSamplesRequired = 2
-    private static let topologyStabilityAdaptiveProbeDivisor: TimeInterval = 6
-    private static let topologyStabilityAdaptiveBackoffMultiplier: TimeInterval = 1.5
+    static let managedVendorID: UInt32 = 0x3456
+    static let managedProductID: UInt32 = 0x1234
+    static let rollbackOfflineWaitTimeout: TimeInterval = 1.2
+    static let rebuildTerminationTimeout: TimeInterval = 2.0
+    static let rebuildOfflineTimeout: TimeInterval = 4.0
+    static let rebuildFinalOfflineConfirmationTimeout: TimeInterval = 0.8
+    static let rebuildFleetCreationCooldown: TimeInterval = 0.6
+    static let rebuildFleetCreationCooldownFastTeardown: TimeInterval = 0.15
+    static let deferredTopologyRecheckMinimumDelay: TimeInterval = 0.03
+    static let deferredTopologyRecheckMultiplier: TimeInterval = 1.5
+    static let aggressiveEnableUnsettledTeardownCooldown: TimeInterval = 0.35
+    static let adaptiveCooldownPollIntervalFloor: TimeInterval = 0.01
+    static let adaptiveCooldownPollIntervalCeiling: TimeInterval = 0.05
+    static let adaptiveCooldownStableSamplesRequired = 2
+    static let topologyStabilityAdaptiveProbeDivisor: TimeInterval = 6
+    static let topologyStabilityAdaptiveBackoffMultiplier: TimeInterval = 1.5
 
     enum TopologyRecoveryMode {
         case fast
@@ -31,7 +31,7 @@ final class VirtualDisplayService {
         case down
     }
 
-    private struct AdaptiveCooldownResult {
+    struct AdaptiveCooldownResult {
         let waitedSeconds: TimeInterval
         let completedEarly: Bool
     }
@@ -65,23 +65,24 @@ final class VirtualDisplayService {
         }
     }
 
-    private let persistenceService: VirtualDisplayPersistenceService
-    private var displays: [CGVirtualDisplay] = []
-    private var displayConfigs: [VirtualDisplayConfig] = []
-    private var runningConfigIds: Set<UUID> = []
-    private var restoreFailures: [VirtualDisplayRestoreFailure] = []
-    private var activeDisplaysByConfigId: [UUID: CGVirtualDisplay] = [:]
-    private var runtimeDisplayIDHintsByConfigId: [UUID: CGDirectDisplayID] = [:]
-    private var runtimeGenerationByConfigId: [UUID: UInt64] = [:]
-    private var aggressiveRecoveryPendingEnableConfigIDs: Set<UUID> = []
-    private var nextRuntimeGeneration: UInt64 = 1
-    private let displayReconfigurationMonitor: any DisplayReconfigurationMonitoring
-    private let topologyInspector: any DisplayTopologyInspecting
-    private let topologyRepairer: any DisplayTopologyRepairing
-    private let teardownCoordinator: DisplayTeardownCoordinator
-    private let topologyStabilityTimeout: TimeInterval
-    private let topologyStabilityPollInterval: TimeInterval
-    private let rebuildRuntimeDisplayHook: (@MainActor (VirtualDisplayConfig, Bool) async throws -> Void)?
+    let persistenceService: VirtualDisplayPersistenceService
+    var displays: [CGVirtualDisplay] = []
+    var displayConfigs: [VirtualDisplayConfig] = []
+    var runningConfigIds: Set<UUID> = []
+    var restoreFailures: [VirtualDisplayRestoreFailure] = []
+    var activeDisplaysByConfigId: [UUID: CGVirtualDisplay] = [:]
+    var runtimeDisplayIDHintsByConfigId: [UUID: CGDirectDisplayID] = [:]
+    var runtimeGenerationByConfigId: [UUID: UInt64] = [:]
+    var aggressiveRecoveryPendingEnableConfigIDs: Set<UUID> = []
+    var nextRuntimeGeneration: UInt64 = 1
+    let displayReconfigurationMonitor: any DisplayReconfigurationMonitoring
+    let topologyInspector: any DisplayTopologyInspecting
+    let topologyRepairer: any DisplayTopologyRepairing
+    let teardownCoordinator: DisplayTeardownCoordinator
+    let topologyStabilityTimeout: TimeInterval
+    let topologyStabilityPollInterval: TimeInterval
+    let rebuildRuntimeDisplayHook: (@MainActor (VirtualDisplayConfig, Bool) async throws -> Void)?
+    lazy var rebuildCoordinator: DisplayRebuildCoordinator = DisplayRebuildCoordinator(service: self)
 
     convenience init(persistenceService: VirtualDisplayPersistenceService? = nil) {
         self.init(
@@ -546,70 +547,7 @@ final class VirtualDisplayService {
     }
 
     func rebuildVirtualDisplay(configId: UUID) async throws {
-        guard let config = displayConfigs.first(where: { $0.id == configId }) else {
-            throw VirtualDisplayError.configNotFound
-        }
-        let snapshotBeforeRebuild = currentTopologySnapshot()
-        let preferredMainDisplayID = TopologyHealthEvaluator.preferredManagedMainDisplayID(
-            snapshot: currentTopologySnapshot()
-        )
-        let targetRuntimeDisplayID = runtimeDisplayID(for: configId)
-        let targetWasManagedMain = TopologyHealthEvaluator.managedDisplayID(
-            for: config.serialNum,
-            snapshot: snapshotBeforeRebuild
-        ) == snapshotBeforeRebuild?.mainDisplayID || targetRuntimeDisplayID == CGMainDisplayID()
-        let useCoordinatedRebuild = shouldUseCoordinatedRebuild(
-            configId: configId,
-            config: config,
-            snapshot: snapshotBeforeRebuild
-        )
-        let coordinatedRebuildTeardownStrategy: FleetRebuildTeardownStrategy =
-            (targetWasManagedMain || targetRuntimeDisplayID == CGMainDisplayID())
-            ? .fleetOfflineOnly
-            : .perDisplaySettlement
-        AppLog.virtualDisplay.debug(
-            "Rebuild strategy resolved (config: \(configId.uuidString, privacy: .public), coordinated: \(useCoordinatedRebuild, privacy: .public), runtimeMainMatch: \(targetRuntimeDisplayID == CGMainDisplayID(), privacy: .public), snapshotAvailable: \(snapshotBeforeRebuild != nil, privacy: .public), teardownStrategy: \(coordinatedRebuildTeardownStrategy.logDescription, privacy: .public))."
-        )
-        if useCoordinatedRebuild {
-            try await rebuildManagedDisplayFleet(
-                prioritizing: configId,
-                fallbackPreferredMainDisplayID: preferredMainDisplayID,
-                teardownStrategy: coordinatedRebuildTeardownStrategy
-            )
-            return
-        }
-
-        let runtimeSerialNum = activeDisplaysByConfigId[configId]?.serialNum ?? config.serialNum
-        let generationToWaitFor = runningConfigIds.contains(configId)
-            ? runtimeGenerationByConfigId[configId]
-            : nil
-        if runningConfigIds.contains(configId) {
-            activeDisplaysByConfigId[configId] = nil
-            runtimeDisplayIDHintsByConfigId[configId] = nil
-            runningConfigIds.remove(configId)
-            displays.removeAll { $0.serialNum == runtimeSerialNum }
-        }
-
-        let terminationConfirmed = try await teardownCoordinator.settleRebuildTeardown(
-            configId: config.id,
-            serialNum: config.serialNum,
-            generationToWaitFor: generationToWaitFor,
-            rebuildTerminationTimeout: Self.rebuildTerminationTimeout,
-            rebuildOfflineTimeout: Self.rebuildOfflineTimeout,
-            rebuildFinalOfflineConfirmationTimeout: Self.rebuildFinalOfflineConfirmationTimeout
-        )
-
-        let recreatedTargetDisplayID = try await recreateRuntimeDisplayForRebuild(
-            config: config,
-            terminationConfirmed: terminationConfirmed
-        )
-        let preferredMainAfterRebuild: CGDirectDisplayID?
-        if targetWasManagedMain {
-            preferredMainAfterRebuild = recreatedTargetDisplayID ?? preferredMainDisplayID
-        } else {
-            preferredMainAfterRebuild = preferredMainDisplayID
-        }
-        try await ensureHealthyTopologyAfterEnable(preferredMainDisplayID: preferredMainAfterRebuild)
+        try await rebuildCoordinator.rebuildVirtualDisplay(configId: configId)
     }
 
     func getConfig(for display: CGVirtualDisplay) -> VirtualDisplayConfig? {
@@ -811,65 +749,9 @@ final class VirtualDisplayService {
         preferredMainDisplayID: CGDirectDisplayID? = nil,
         recoveryMode: TopologyRecoveryMode = .aggressive
     ) async throws {
-        AppLog.virtualDisplay.debug(
-            "Topology recovery start (mode: \(recoveryMode.logDescription, privacy: .public), preferredMain: \(String(describing: preferredMainDisplayID), privacy: .public))."
-        )
-        let initialRequiredStableSamples = recoveryMode == .fast ? 1 : 3
-        let initialMinimumTimeout = recoveryMode == .fast ? 0.0 : 0.35
-        guard let stableSnapshot = await waitForStableTopology(
-            requiredStableSamples: initialRequiredStableSamples,
-            minimumTimeout: initialMinimumTimeout
-        ) else {
-            AppLog.virtualDisplay.error(
-                "Topology recovery failed to obtain initial stable snapshot (mode: \(recoveryMode.logDescription, privacy: .public))."
-            )
-            throw VirtualDisplayError.topologyUnstableAfterEnable
-        }
-        logTopologySnapshot("topologyRecovery:initialStable", snapshot: stableSnapshot)
-
-        let desiredManagedSerials = Set(displayConfigs.filter(\.desiredEnabled).map(\.serialNum))
-        let initialVisibleDesiredManagedCount = stableSnapshot.displays.filter {
-            $0.isManagedVirtualDisplay && desiredManagedSerials.contains($0.serialNumber)
-        }.count
-        let repairedOnInitialPass = try await repairTopologyIfNeeded(
-            snapshot: stableSnapshot,
-            desiredManagedSerials: desiredManagedSerials,
+        try await rebuildCoordinator.ensureHealthyTopologyAfterEnable(
             preferredMainDisplayID: preferredMainDisplayID,
-            allowForceNormalization: recoveryMode == .aggressive
-        )
-
-        // macOS may apply an additional topology transition shortly after enable.
-        // Run a delayed verification pass to catch late mirror collapse regressions.
-        let initialSnapshotIncompleteForDesiredManagedSet =
-            initialVisibleDesiredManagedCount < desiredManagedSerials.count
-        let shouldRunDeferredVerification =
-            recoveryMode == .aggressive ||
-            repairedOnInitialPass ||
-            initialSnapshotIncompleteForDesiredManagedSet
-        guard shouldRunDeferredVerification, desiredManagedSerials.count >= 2 else {
-            AppLog.virtualDisplay.debug(
-                "Topology recovery deferred verification skipped (mode: \(recoveryMode.logDescription, privacy: .public), repairedInitial: \(repairedOnInitialPass, privacy: .public), initialVisibleDesiredManagedCount: \(initialVisibleDesiredManagedCount, privacy: .public), desiredCount: \(desiredManagedSerials.count, privacy: .public))."
-            )
-            return
-        }
-        let deferredDelay = max(
-            Self.deferredTopologyRecheckMinimumDelay,
-            topologyStabilityPollInterval * Self.deferredTopologyRecheckMultiplier
-        )
-        await sleepForRetry(seconds: deferredDelay)
-
-        guard let deferredSnapshot = await waitForStableTopology() else {
-            AppLog.virtualDisplay.warning(
-                "Topology recovery deferred verification skipped due to unstable snapshot (mode: \(recoveryMode.logDescription, privacy: .public))."
-            )
-            return
-        }
-        logTopologySnapshot("topologyRecovery:deferredStable", snapshot: deferredSnapshot)
-        _ = try await repairTopologyIfNeeded(
-            snapshot: deferredSnapshot,
-            desiredManagedSerials: desiredManagedSerials,
-            preferredMainDisplayID: preferredMainDisplayID,
-            allowForceNormalization: false
+            recoveryMode: recoveryMode
         )
     }
 
@@ -1039,6 +921,17 @@ final class VirtualDisplayService {
                 continue
             }
 
+            if previousSnapshot == nil {
+                previousSnapshot = currentSnapshot
+                stableSampleCount = 1
+                // For fast mode (targetStableSamples == 1) return immediately on first valid snapshot
+                if targetStableSamples == 1 {
+                    return currentSnapshot
+                }
+                await sleepForRetry(seconds: fastProbeInterval)
+                continue
+            }
+
             if previousSnapshot == currentSnapshot {
                 stableSampleCount += 1
                 currentPollInterval = min(
@@ -1052,6 +945,10 @@ final class VirtualDisplayService {
                 previousSnapshot = currentSnapshot
                 stableSampleCount = 1
                 currentPollInterval = fastProbeInterval
+                // For fast mode (targetStableSamples == 1) return as soon as we observe a snapshot
+                if targetStableSamples == 1 {
+                    return currentSnapshot
+                }
             }
 
             if stableSampleCount >= targetStableSamples {
@@ -1068,7 +965,7 @@ final class VirtualDisplayService {
         clearRuntimeTracking(configId: configId, serialNum: serialNum, keepGeneration: true)
     }
 
-    private func currentTopologySnapshot() -> DisplayTopologySnapshot? {
+    func currentTopologySnapshot() -> DisplayTopologySnapshot? {
         topologyInspector.snapshot(
             trackedManagedSerials: trackedManagedSerials(),
             managedVendorID: Self.managedVendorID,
@@ -1205,7 +1102,7 @@ final class VirtualDisplayService {
     }
 
     @discardableResult
-    private func createRuntimeDisplayWithRetries(
+    func createRuntimeDisplayWithRetries(
         from config: VirtualDisplayConfig,
         terminationConfirmed: Bool
     ) async throws -> CGVirtualDisplay {
@@ -1246,7 +1143,7 @@ final class VirtualDisplayService {
         teardownCoordinator.isManagedDisplayOnline(serialNum: serialNum)
     }
 
-    private func sleepForRetry(seconds: TimeInterval) async {
+    func sleepForRetry(seconds: TimeInterval) async {
         let nanoseconds = UInt64(max(seconds, 0) * 1_000_000_000)
         do {
             try await Task.sleep(nanoseconds: nanoseconds)
@@ -1255,7 +1152,7 @@ final class VirtualDisplayService {
         }
     }
 
-    private func waitForAdaptiveManagedDisplayCooldown(
+    func waitForAdaptiveManagedDisplayCooldown(
         serialNumbers: [UInt32],
         maxCooldown: TimeInterval
     ) async -> AdaptiveCooldownResult {
@@ -1430,16 +1327,5 @@ final class VirtualDisplayService {
             runningConfigIds.contains(configId),
             runtimeGenerationByConfigId[configId]
         )
-    }
-}
-
-private extension VirtualDisplayService.TopologyRecoveryMode {
-    var logDescription: String {
-        switch self {
-        case .fast:
-            return "fast"
-        case .aggressive:
-            return "aggressive"
-        }
     }
 }

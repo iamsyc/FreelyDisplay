@@ -24,7 +24,7 @@ struct CaptureDisplayView: View {
     @State private var hasAppliedInitialSize = false
 
     private var session: AppHelper.ScreenMonitoringSession? {
-        appHelper.monitoringSession(for: sessionId)
+        appHelper.capture.monitoringSession(for: sessionId)
     }
 
     var body: some View {
@@ -41,7 +41,7 @@ struct CaptureDisplayView: View {
             }
         }
         .clipped()
-        .onChange(of: appHelper.screenCaptureSessions.map(\.id)) { _, ids in
+        .onChange(of: appHelper.capture.screenCaptureSessions.map(\.id)) { _, ids in
             if !ids.contains(sessionId) {
                 startTask?.cancel()
                 startTask = nil
@@ -70,12 +70,12 @@ struct CaptureDisplayView: View {
                         sampleHandlerQueue: captureOut.sampleHandlerQueue
                     )
                     try await session.stream.startCapture()
-                    appHelper.markMonitoringSessionActive(id: sessionId)
+                    appHelper.capture.markMonitoringSessionActive(id: sessionId)
                 } catch is CancellationError {
                     return
                 } catch {
                     AppErrorMapper.logFailure("Start monitoring stream", error: error, logger: AppLog.capture)
-                    appHelper.removeMonitoringSession(id: sessionId)
+                    appHelper.capture.removeMonitoringSession(id: sessionId)
                     dismiss()
                 }
             }
@@ -83,7 +83,7 @@ struct CaptureDisplayView: View {
         .onDisappear {
             startTask?.cancel()
             startTask = nil
-            appHelper.removeMonitoringSession(id: sessionId)
+            appHelper.capture.removeMonitoringSession(id: sessionId)
         }
         .overlay {
             WindowAccessor { currentWindow in

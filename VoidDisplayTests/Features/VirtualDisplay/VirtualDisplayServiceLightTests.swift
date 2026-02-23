@@ -129,6 +129,77 @@ struct VirtualDisplayServiceLightTests {
         #expect(result.completedEarly)
         #expect(result.waitedSeconds < 0.5)
     }
+
+    @Test
+    func disableByConfigMarksAggressiveWhenRuntimeMain() async {
+        let store = InMemoryStore()
+        let sut = makeService(store: store)
+        let config = makeConfig(serial: 11, name: "Main")
+        sut.replaceDisplayConfigs([config])
+
+        // Pretend the runtime display was the system main display.
+        sut.seedRuntimeBookkeeping(configId: config.id, generation: 42, runtimeDisplayID: CGMainDisplayID())
+
+        try? await sut.disableDisplayByConfig(config.id)
+
+        #expect(store.saves.count == 1)
+        #expect(sut.currentDisplayConfigs.first?.desiredEnabled == false)
+        #expect(sut.runtimeBookkeeping(configId: config.id).generation == 42)
+        #expect(sut.runtimeDisplayID(for: config.id) == nil)
+        #expect(sut.aggressiveRecoveryPendingEnableConfigIDs.contains(config.id))
+        #expect(sut.runningConfigIds.contains(config.id) == false)
+    }
+
+    @Test
+    func destroyDisplayClearsTrackingAndPersists() {
+        let store = InMemoryStore()
+        let sut = makeService(store: store)
+        let config = makeConfig(serial: 12, name: "Destroy")
+        sut.replaceDisplayConfigs([config])
+        sut.seedRuntimeBookkeeping(configId: config.id, generation: 5, runtimeDisplayID: 777)
+        sut.aggressiveRecoveryPendingEnableConfigIDs.insert(config.id)
+
+        sut.destroyDisplay(config.id)
+
+        #expect(store.saves.count == 1)
+        #expect(sut.currentDisplayConfigs.isEmpty)
+        #expect(sut.runtimeDisplayID(for: config.id) == nil)
+        #expect(sut.runtimeBookkeeping(configId: config.id).isRunning == false)
+        #expect(sut.aggressiveRecoveryPendingEnableConfigIDs.contains(config.id) == false)
+    }
+
+    @Test
+    func resetAllVirtualDisplayDataClearsStateAndResetsStore() {
+        let store = InMemoryStore()
+        let sut = makeService(store: store)
+        let configs = [makeConfig(serial: 1, name: "A"), makeConfig(serial: 2, name: "B")]
+        sut.replaceDisplayConfigs(configs)
+        sut.seedRuntimeBookkeeping(configId: configs[0].id, generation: 3, runtimeDisplayID: 101)
+        sut.seedRuntimeBookkeeping(configId: configs[1].id, generation: 4, runtimeDisplayID: 202)
+
+        let removed = sut.resetAllVirtualDisplayData()
+
+        #expect(removed == 2)
+        #expect(sut.currentDisplayConfigs.isEmpty)
+        #expect(sut.runtimeDisplayID(for: configs[0].id) == nil)
+        #expect(sut.runtimeBookkeeping(configId: configs[1].id).generation == nil)
+        #expect(sut.runningConfigIds.isEmpty)
+        #expect(store.resets == 1)
+        #expect(store.saves.isEmpty)
+    }
+
+    @Test
+    func nextAvailableSerialNumberSkipsExisting() {
+        let sut = makeService(store: InMemoryStore())
+        sut.replaceDisplayConfigs([
+            makeConfig(serial: 1, name: "One"),
+            makeConfig(serial: 3, name: "Three")
+        ])
+
+        let next = sut.nextAvailableSerialNumber()
+
+        #expect(next == 2)
+    }
 }
 
 // MARK: - Helpers

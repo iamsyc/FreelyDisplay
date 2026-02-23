@@ -240,7 +240,7 @@ struct EditDisplaySettingsView: View {
         display.apply(settings)
         
         // Update stored config with new modes
-        appHelper.updateConfig(for: display, modes: selectedModes)
+        appHelper.virtualDisplay.updateConfig(for: display, modes: selectedModes)
         
         isShow = false
     }

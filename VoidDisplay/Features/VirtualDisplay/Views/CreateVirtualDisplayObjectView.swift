@@ -314,7 +314,7 @@ struct CreateVirtualDisplay: View {
             let initial = CreateVirtualDisplayInputValidator.initializeNameAndSerial(
                 currentName: name,
                 baseName: baseDisplayName,
-                nextSerial: appHelper.nextAvailableSerialNumber()
+                nextSerial: appHelper.virtualDisplay.nextAvailableSerialNumber()
             )
             serialNum = initial.serialNum
             name = initial.name
@@ -367,7 +367,7 @@ struct CreateVirtualDisplay: View {
         let size = physicalSize
         
         do {
-            _ = try appHelper.createDisplay(
+            _ = try appHelper.virtualDisplay.createDisplay(
                 name: name,
                 serialNum: serialNum,
                 physicalSize: CGSize(width: size.width, height: size.height),

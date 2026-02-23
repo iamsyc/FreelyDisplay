@@ -30,7 +30,7 @@ struct EditVirtualDisplayConfigView: View {
     @State private var errorMessage = ""
 
     private var isRunning: Bool {
-        appHelper.isVirtualDisplayRunning(configId: configId)
+        appHelper.virtualDisplay.isVirtualDisplayRunning(configId: configId)
     }
 
     private var trimmedName: String {
@@ -304,7 +304,7 @@ struct EditVirtualDisplayConfigView: View {
     }
 
     private func load() {
-        guard let config = appHelper.getConfig(configId) else {
+        guard let config = appHelper.virtualDisplay.getConfig(configId) else {
             errorMessage = String(localized: "Display configuration not found.")
             showError = true
             return
@@ -334,7 +334,7 @@ struct EditVirtualDisplayConfigView: View {
             original: loadedConfig,
             configId: configId,
             draft: saveDraft,
-            existingConfigs: appHelper.displayConfigs,
+            existingConfigs: appHelper.virtualDisplay.displayConfigs,
             isRunning: isRunning
         )
 
@@ -362,19 +362,19 @@ struct EditVirtualDisplayConfigView: View {
     }
 
     private func performSaveOnly(_ analysis: VirtualDisplayEditSaveAnalyzer.SaveAnalysis) {
-        appHelper.updateConfig(analysis.updatedConfig)
+        appHelper.virtualDisplay.updateConfig(analysis.updatedConfig)
         loadedConfig = analysis.updatedConfig
         if analysis.shouldApplyModesImmediately {
-            appHelper.applyModes(configId: configId, modes: selectedModes)
+            appHelper.virtualDisplay.applyModes(configId: configId, modes: selectedModes)
         }
         dismiss()
     }
 
     private func performSaveAndRebuild(_ analysis: VirtualDisplayEditSaveAnalyzer.SaveAnalysis) {
-        appHelper.updateConfig(analysis.updatedConfig)
+        appHelper.virtualDisplay.updateConfig(analysis.updatedConfig)
         loadedConfig = analysis.updatedConfig
         dismiss()
-        appHelper.startRebuildFromSavedConfig(configId: configId)
+        appHelper.virtualDisplay.startRebuildFromSavedConfig(configId: configId)
     }
 
     private func addPresetMode() {

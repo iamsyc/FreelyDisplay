@@ -77,6 +77,9 @@ struct HomeView: View {
 }
 
 #Preview {
+    let env = AppBootstrap.makeEnvironment(preview: true, isRunningUnderXCTestOverride: false)
     HomeView()
-        .environment(AppHelper(preview: true))
+        .environment(env.capture)
+        .environment(env.sharing)
+        .environment(env.virtualDisplay)
 }

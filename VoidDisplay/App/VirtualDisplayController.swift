@@ -79,6 +79,14 @@ final class VirtualDisplayController {
         virtualDisplayService.runtimeDisplay(for: configId)
     }
 
+    func isManagedVirtualDisplay(displayID: CGDirectDisplayID) -> Bool {
+        displays.contains(where: { $0.displayID == displayID })
+    }
+
+    func virtualSerialForManagedDisplay(_ displayID: CGDirectDisplayID) -> UInt32? {
+        displays.first(where: { $0.displayID == displayID })?.serialNum
+    }
+
     func isVirtualDisplayRunning(configId: UUID) -> Bool {
         virtualDisplayService.isVirtualDisplayRunning(configId: configId)
     }

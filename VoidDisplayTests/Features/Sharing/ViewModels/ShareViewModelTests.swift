@@ -123,11 +123,11 @@ struct ShareViewModelTests {
                 requestResult: false
             )
         )
-        let appHelper = makeAppHelper()
+        let env = makeEnvironment()
         sut.displays = []
         sut.isLoadingDisplays = true
 
-        sut.requestScreenCapturePermission(appHelper: appHelper)
+        sut.requestScreenCapturePermission(sharing: env.sharing, virtualDisplay: env.virtualDisplay)
 
         #expect(sut.hasScreenCapturePermission == false)
         #expect(sut.lastRequestPermission == false)
@@ -137,9 +137,9 @@ struct ShareViewModelTests {
         #expect(sut.loadErrorMessage != nil)
     }
 
-    @MainActor @Test func loadDisplaysRegistersDisplaysThroughAppHelper() async {
+    @MainActor @Test func loadDisplaysRegistersDisplaysThroughControllers() async {
         let sharing = MockSharingService()
-        let appHelper = makeAppHelper(sharing: sharing)
+        let env = makeEnvironment(sharing: sharing)
         let sut = ShareViewModel(
             permissionProvider: MockScreenCapturePermissionProvider(
                 preflightResult: true,
@@ -148,7 +148,7 @@ struct ShareViewModelTests {
             loadShareableDisplays: { [] }
         )
 
-        sut.loadDisplays(appHelper: appHelper)
+        sut.loadDisplays(sharing: env.sharing, virtualDisplay: env.virtualDisplay)
         let finished = await waitUntil {
             sut.isLoadingDisplays == false && sut.displays != nil
         }
@@ -159,7 +159,7 @@ struct ShareViewModelTests {
     }
 
     @MainActor @Test func loadDisplaysRecordsDetailedErrorWhenLoaderFails() async {
-        let appHelper = makeAppHelper()
+        let env = makeEnvironment()
         let expected = NSError(domain: "ShareTests", code: 77)
         let sut = ShareViewModel(
             permissionProvider: MockScreenCapturePermissionProvider(
@@ -169,7 +169,7 @@ struct ShareViewModelTests {
             loadShareableDisplays: { throw expected }
         )
 
-        sut.loadDisplays(appHelper: appHelper)
+        sut.loadDisplays(sharing: env.sharing, virtualDisplay: env.virtualDisplay)
         let finished = await waitUntil {
             sut.isLoadingDisplays == false && sut.lastLoadError != nil
         }
@@ -183,7 +183,7 @@ struct ShareViewModelTests {
     @MainActor @Test func startServiceFailurePresentsUserFacingError() async {
         let sharing = MockSharingService()
         sharing.startResult = false
-        let appHelper = makeAppHelper(sharing: sharing)
+        let env = makeEnvironment(sharing: sharing)
         let sut = ShareViewModel(
             permissionProvider: MockScreenCapturePermissionProvider(
                 preflightResult: true,
@@ -191,7 +191,7 @@ struct ShareViewModelTests {
             )
         )
 
-        sut.startService(appHelper: appHelper)
+        sut.startService(sharing: env.sharing, virtualDisplay: env.virtualDisplay)
         let presented = await waitUntil {
             sut.showOpenPageError
         }
@@ -205,7 +205,7 @@ struct ShareViewModelTests {
         let gate = SequencedShareDisplayLoaderGate(
             scriptedOutcomes: [.failure, .success]
         )
-        let appHelper = makeAppHelper()
+        let env = makeEnvironment()
         let sut = ShareViewModel(
             permissionProvider: MockScreenCapturePermissionProvider(
                 preflightResult: true,
@@ -221,10 +221,10 @@ struct ShareViewModelTests {
             }
         )
 
-        sut.loadDisplays(appHelper: appHelper)
+        sut.loadDisplays(sharing: env.sharing, virtualDisplay: env.virtualDisplay)
         #expect(await waitForLoaderCall(gate, count: 1))
 
-        sut.loadDisplays(appHelper: appHelper)
+        sut.loadDisplays(sharing: env.sharing, virtualDisplay: env.virtualDisplay)
         #expect(await waitForLoaderCall(gate, count: 2))
 
         await gate.release(call: 2)
@@ -250,7 +250,7 @@ struct ShareViewModelTests {
         )
         let sharing = MockSharingService()
         sharing.isWebServiceRunning = true
-        let appHelper = makeAppHelper(sharing: sharing)
+        let env = makeEnvironment(sharing: sharing)
         let sut = ShareViewModel(
             permissionProvider: MockScreenCapturePermissionProvider(
                 preflightResult: true,
@@ -266,10 +266,10 @@ struct ShareViewModelTests {
             }
         )
 
-        sut.loadDisplays(appHelper: appHelper)
+        sut.loadDisplays(sharing: env.sharing, virtualDisplay: env.virtualDisplay)
         #expect(await waitForLoaderCall(gate, count: 1))
 
-        sut.stopService(appHelper: appHelper)
+        sut.stopService(sharing: env.sharing, virtualDisplay: env.virtualDisplay)
         #expect(sut.isLoadingDisplays == false)
         #expect(sut.displays == nil)
 
@@ -281,13 +281,13 @@ struct ShareViewModelTests {
     }
 
     @MainActor
-    private func makeAppHelper() -> AppHelper {
-        makeAppHelper(sharing: MockSharingService())
+    private func makeEnvironment() -> AppEnvironment {
+        makeEnvironment(sharing: MockSharingService())
     }
 
     @MainActor
-    private func makeAppHelper(sharing: MockSharingService) -> AppHelper {
-        AppHelper(
+    private func makeEnvironment(sharing: MockSharingService) -> AppEnvironment {
+        AppBootstrap.makeEnvironment(
             preview: true,
             captureMonitoringService: MockCaptureMonitoringService(),
             sharingService: sharing,

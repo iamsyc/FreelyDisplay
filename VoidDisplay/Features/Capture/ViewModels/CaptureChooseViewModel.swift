@@ -50,8 +50,8 @@ final class CaptureChooseViewModel {
         }
     }
 
-    func isVirtualDisplay(_ display: SCDisplay, appHelper: AppHelper) -> Bool {
-        appHelper.isManagedVirtualDisplay(displayID: display.displayID)
+    func isVirtualDisplay(_ display: SCDisplay, virtualDisplay: VirtualDisplayController) -> Bool {
+        virtualDisplay.isManagedVirtualDisplay(displayID: display.displayID)
     }
 
     func displayName(for display: SCDisplay) -> String {
@@ -74,25 +74,30 @@ final class CaptureChooseViewModel {
         return true
     }
 
-    func startMonitoring(display: SCDisplay, appHelper: AppHelper, openWindow: @escaping (UUID) -> Void) async {
+    func startMonitoring(
+        display: SCDisplay,
+        capture: CaptureController,
+        virtualDisplay: VirtualDisplayController,
+        openWindow: @escaping (UUID) -> Void
+    ) async {
         _ = await withDisplayStartLock(displayID: display.displayID) {
-            if let existingSession = appHelper.capture.screenCaptureSessions.first(where: { $0.displayID == display.displayID }) {
+            if let existingSession = capture.screenCaptureSessions.first(where: { $0.displayID == display.displayID }) {
                 openWindow(existingSession.id)
                 return
             }
 
             let captureSession = await makeScreenCaptureSession(display)
-            let session = AppHelper.ScreenMonitoringSession(
+            let session = ScreenMonitoringSession(
                 id: UUID(),
                 displayID: display.displayID,
                 displayName: displayName(for: display),
                 resolutionText: resolutionText(for: display),
-                isVirtualDisplay: isVirtualDisplay(display, appHelper: appHelper),
+                isVirtualDisplay: isVirtualDisplay(display, virtualDisplay: virtualDisplay),
                 stream: captureSession.stream,
                 delegate: captureSession.delegate,
                 state: .starting
             )
-            appHelper.capture.addMonitoringSession(session)
+            capture.addMonitoringSession(session)
             openWindow(session.id)
         }
     }

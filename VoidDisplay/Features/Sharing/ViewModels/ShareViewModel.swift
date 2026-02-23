@@ -52,35 +52,44 @@ final class ShareViewModel {
         }
     }
 
-    func syncForCurrentState(appHelper: AppHelper) {
+    func syncForCurrentState(
+        sharing: SharingController,
+        virtualDisplay: VirtualDisplayController
+    ) {
         guard hasScreenCapturePermission == true else {
             cancelInFlightDisplayLoad()
             displays = nil
             return
         }
-        guard appHelper.sharing.isWebServiceRunning else {
+        guard sharing.isWebServiceRunning else {
             cancelInFlightDisplayLoad()
             displays = nil
             return
         }
-        loadDisplaysIfNeeded(appHelper: appHelper)
+        loadDisplaysIfNeeded(sharing: sharing, virtualDisplay: virtualDisplay)
     }
 
-    func startService(appHelper: AppHelper) {
+    func startService(
+        sharing: SharingController,
+        virtualDisplay: VirtualDisplayController
+    ) {
         Task { @MainActor in
-            guard await appHelper.sharing.startWebService() else {
+            guard await sharing.startWebService() else {
                 AppLog.sharing.error("Start service failed.")
                 presentError(String(localized: "Failed to start web service."))
                 return
             }
-            syncForCurrentState(appHelper: appHelper)
+            syncForCurrentState(sharing: sharing, virtualDisplay: virtualDisplay)
         }
     }
 
-    func stopService(appHelper: AppHelper) {
+    func stopService(
+        sharing: SharingController,
+        virtualDisplay: VirtualDisplayController
+    ) {
         cancelInFlightDisplayLoad()
-        appHelper.sharing.stopWebService()
-        syncForCurrentState(appHelper: appHelper)
+        sharing.stopWebService()
+        syncForCurrentState(sharing: sharing, virtualDisplay: virtualDisplay)
     }
 
     func openScreenCapturePrivacySettings(openURL: (URL) -> Void) {
@@ -91,7 +100,10 @@ final class ShareViewModel {
         }
     }
 
-    func requestScreenCapturePermission(appHelper: AppHelper) {
+    func requestScreenCapturePermission(
+        sharing: SharingController,
+        virtualDisplay: VirtualDisplayController
+    ) {
         let requestResult = permissionProvider.request()
         lastRequestPermission = requestResult
 
@@ -110,10 +122,13 @@ final class ShareViewModel {
             AppLog.capture.notice("Screen capture permission request denied (sharing).")
             return
         }
-        syncForCurrentState(appHelper: appHelper)
+        syncForCurrentState(sharing: sharing, virtualDisplay: virtualDisplay)
     }
 
-    func refreshPermissionAndMaybeLoad(appHelper: AppHelper) {
+    func refreshPermissionAndMaybeLoad(
+        sharing: SharingController,
+        virtualDisplay: VirtualDisplayController
+    ) {
         let granted = permissionProvider.preflight()
         hasScreenCapturePermission = granted
         lastPreflightPermission = granted
@@ -122,15 +137,21 @@ final class ShareViewModel {
             displays = nil
             return
         }
-        syncForCurrentState(appHelper: appHelper)
+        syncForCurrentState(sharing: sharing, virtualDisplay: virtualDisplay)
     }
 
-    func loadDisplaysIfNeeded(appHelper: AppHelper) {
+    func loadDisplaysIfNeeded(
+        sharing: SharingController,
+        virtualDisplay: VirtualDisplayController
+    ) {
         guard !isLoadingDisplays, displays == nil else { return }
-        loadDisplays(appHelper: appHelper)
+        loadDisplays(sharing: sharing, virtualDisplay: virtualDisplay)
     }
 
-    func loadDisplays(appHelper: AppHelper) {
+    func loadDisplays(
+        sharing: SharingController,
+        virtualDisplay: VirtualDisplayController
+    ) {
         if UITestRuntime.isEnabled, UITestRuntime.scenario == .permissionDenied {
             cancelInFlightDisplayLoad()
             hasScreenCapturePermission = false
@@ -158,7 +179,9 @@ final class ShareViewModel {
                     self.displays = shareableDisplays
                     self.hasScreenCapturePermission = true
                     self.lastPreflightPermission = true
-                    appHelper.registerShareableDisplays(shareableDisplays)
+                    sharing.registerShareableDisplays(shareableDisplays) { displayID in
+                        virtualDisplay.virtualSerialForManagedDisplay(displayID)
+                    }
                     self.finishDisplayLoadRequestIfCurrent(requestID: requestID)
                 }
             } catch is CancellationError {
@@ -186,9 +209,12 @@ final class ShareViewModel {
         displayLoadTask = task
     }
 
-    func refreshDisplays(appHelper: AppHelper) {
-        guard appHelper.sharing.isWebServiceRunning else { return }
-        loadDisplays(appHelper: appHelper)
+    func refreshDisplays(
+        sharing: SharingController,
+        virtualDisplay: VirtualDisplayController
+    ) {
+        guard sharing.isWebServiceRunning else { return }
+        loadDisplays(sharing: sharing, virtualDisplay: virtualDisplay)
     }
 
     @discardableResult
@@ -203,13 +229,13 @@ final class ShareViewModel {
         return true
     }
 
-    func startSharing(display: SCDisplay, appHelper: AppHelper) async {
+    func startSharing(display: SCDisplay, sharing: SharingController) async {
         _ = await withDisplayStartLock(displayID: display.displayID) {
             let ready: Bool
-            if appHelper.sharing.isWebServiceRunning {
+            if sharing.isWebServiceRunning {
                 ready = true
             } else {
-                ready = await appHelper.sharing.startWebService()
+                ready = await sharing.startWebService()
             }
             guard ready else {
                 presentError(String(localized: "Web service is not running."))
@@ -226,26 +252,26 @@ final class ShareViewModel {
                     sampleHandlerQueue: stream.sampleHandlerQueue
                 )
                 try await captureSession.stream.startCapture()
-                appHelper.sharing.beginSharing(
+                sharing.beginSharing(
                     displayID: display.displayID,
                     stream: captureSession.stream,
                     output: stream,
                     delegate: captureSession.delegate
                 )
             } catch {
-                appHelper.sharing.stopSharing(displayID: display.displayID)
+                sharing.stopSharing(displayID: display.displayID)
                 AppErrorMapper.logFailure("Start sharing", error: error, logger: AppLog.sharing)
                 presentError(AppErrorMapper.userMessage(for: error, fallback: String(localized: "Failed to start sharing.")))
             }
         }
     }
 
-    func stopSharing(displayID: CGDirectDisplayID, appHelper: AppHelper) {
-        appHelper.sharing.stopSharing(displayID: displayID)
+    func stopSharing(displayID: CGDirectDisplayID, sharing: SharingController) {
+        sharing.stopSharing(displayID: displayID)
     }
 
-    func sharePageAddress(for displayID: CGDirectDisplayID, appHelper: AppHelper) -> String? {
-        appHelper.sharing.sharePageAddress(for: displayID)
+    func sharePageAddress(for displayID: CGDirectDisplayID, sharing: SharingController) -> String? {
+        sharing.sharePageAddress(for: displayID)
     }
 
     func clearError() {

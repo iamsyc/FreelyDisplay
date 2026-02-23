@@ -8,7 +8,7 @@ import SwiftUI
 import OSLog
 
 struct VirtualDisplayView: View {
-    @Environment(AppHelper.self) private var appHelper: AppHelper
+    @Environment(VirtualDisplayController.self) private var virtualDisplay
     @State var createView = false
     @State private var editingConfig: EditingConfig?
     @State private var primaryDisplayMonitor = DebouncingDisplayReconfigurationMonitor()
@@ -31,8 +31,8 @@ struct VirtualDisplayView: View {
     var body: some View {
         let _ = primaryDisplayRefreshTick
         Group {
-            if !appHelper.virtualDisplay.displayConfigs.isEmpty {
-                List(appHelper.virtualDisplay.displayConfigs) { config in
+            if !virtualDisplay.displayConfigs.isEmpty {
+                List(virtualDisplay.displayConfigs) { config in
                     virtualDisplayRow(config)
                         .appListRowStyle()
                 }
@@ -53,7 +53,7 @@ struct VirtualDisplayView: View {
         }
         .sheet(item: $editingConfig) { item in
             EditVirtualDisplayConfigView(configId: item.id)
-                .environment(appHelper)
+                .environment(virtualDisplay)
         }
         .toolbar {
             Button("Add Virtual Display", systemImage: "plus") {
@@ -67,7 +67,7 @@ struct VirtualDisplayView: View {
             presenting: deleteCandidate
         ) { config in
             Button("Delete", role: .destructive) {
-                appHelper.virtualDisplay.destroyDisplay(config.id)
+                virtualDisplay.destroyDisplay(config.id)
                 deleteCandidate = nil
             }
             Button("Cancel", role: .cancel) {
@@ -82,7 +82,7 @@ struct VirtualDisplayView: View {
             Text(errorMessage)
         }
         .onAppear {
-            if !appHelper.virtualDisplay.restoreFailures.isEmpty {
+            if !virtualDisplay.restoreFailures.isEmpty {
                 showRestoreFailureAlert = true
             }
             startPrimaryDisplayMonitoring()
@@ -90,17 +90,17 @@ struct VirtualDisplayView: View {
         .onDisappear {
             stopPrimaryDisplayMonitoring()
         }
-        .onChange(of: appHelper.virtualDisplay.restoreFailures) { _, newValue in
+        .onChange(of: virtualDisplay.restoreFailures) { _, newValue in
             if !newValue.isEmpty {
                 showRestoreFailureAlert = true
             }
         }
         .alert(String(localized: "Restore Failed"), isPresented: $showRestoreFailureAlert) {
             Button("OK") {
-                appHelper.virtualDisplay.clearRestoreFailures()
+                virtualDisplay.clearRestoreFailures()
             }
         } message: {
-            Text(VirtualDisplayRowPresentation.restoreFailureSummary(appHelper.virtualDisplay.restoreFailures))
+            Text(VirtualDisplayRowPresentation.restoreFailureSummary(virtualDisplay.restoreFailures))
         }
         .appScreenBackground()
     }
@@ -144,13 +144,13 @@ struct VirtualDisplayView: View {
     }
 
     private func virtualDisplayRow(_ config: VirtualDisplayConfig) -> some View {
-        let isRunning = appHelper.virtualDisplay.isVirtualDisplayRunning(configId: config.id)
+        let isRunning = virtualDisplay.isVirtualDisplayRunning(configId: config.id)
         let isToggling = togglingConfigIds.contains(config.id)
-        let isRebuilding = appHelper.virtualDisplay.isRebuilding(configId: config.id)
-        let rebuildFailureMessage = appHelper.virtualDisplay.rebuildFailureMessage(configId: config.id)
-        let hasRecentApplySuccess = appHelper.virtualDisplay.hasRecentApplySuccess(configId: config.id)
-        let isFirst = appHelper.virtualDisplay.displayConfigs.first?.id == config.id
-        let isLast = appHelper.virtualDisplay.displayConfigs.last?.id == config.id
+        let isRebuilding = virtualDisplay.isRebuilding(configId: config.id)
+        let rebuildFailureMessage = virtualDisplay.rebuildFailureMessage(configId: config.id)
+        let hasRecentApplySuccess = virtualDisplay.hasRecentApplySuccess(configId: config.id)
+        let isFirst = virtualDisplay.displayConfigs.first?.id == config.id
+        let isLast = virtualDisplay.displayConfigs.last?.id == config.id
         let isPrimary = isPrimaryDisplay(configID: config.id)
         return VirtualDisplayRow(
             config: config,
@@ -162,38 +162,38 @@ struct VirtualDisplayView: View {
             isFirst: isFirst,
             isLast: isLast,
             isPrimary: isPrimary,
-            onMoveUp: { _ = appHelper.virtualDisplay.moveDisplayConfig(config.id, direction: .up) },
-            onMoveDown: { _ = appHelper.virtualDisplay.moveDisplayConfig(config.id, direction: .down) },
+            onMoveUp: { _ = virtualDisplay.moveDisplayConfig(config.id, direction: .up) },
+            onMoveDown: { _ = virtualDisplay.moveDisplayConfig(config.id, direction: .down) },
             onToggle: { toggleDisplayState(config) },
             onEdit: { editingConfig = EditingConfig(id: config.id) },
             onDelete: {
                 deleteCandidate = config
                 showDeleteConfirm = true
             },
-            onRetryRebuild: { appHelper.virtualDisplay.retryRebuild(configId: config.id) }
+            onRetryRebuild: { virtualDisplay.retryRebuild(configId: config.id) }
         )
     }
 
     private func isPrimaryDisplay(configID: UUID) -> Bool {
-        guard let runtimeDisplay = appHelper.virtualDisplay.runtimeDisplay(for: configID) else {
+        guard let runtimeDisplay = virtualDisplay.runtimeDisplay(for: configID) else {
             return false
         }
         let displayID = runtimeDisplay.displayID
         let mainID = CGMainDisplayID()
         return displayID == mainID
-    }
+        }
     
     private func toggleDisplayState(_ config: VirtualDisplayConfig) {
         guard !togglingConfigIds.contains(config.id),
-              !appHelper.virtualDisplay.isRebuilding(configId: config.id) else { return }
+              !virtualDisplay.isRebuilding(configId: config.id) else { return }
         togglingConfigIds.insert(config.id)
 
         Task { @MainActor in
             defer { togglingConfigIds.remove(config.id) }
 
-            if appHelper.virtualDisplay.isVirtualDisplayRunning(configId: config.id) {
+            if virtualDisplay.isVirtualDisplayRunning(configId: config.id) {
                 do {
-                    try appHelper.virtualDisplay.disableDisplayByConfig(config.id)
+                    try virtualDisplay.disableDisplayByConfig(config.id)
                 } catch {
                     AppErrorMapper.logFailure("Disable virtual display", error: error, logger: AppLog.virtualDisplay)
                     errorMessage = AppErrorMapper.userMessage(for: error, fallback: String(localized: "Disable failed."))
@@ -202,7 +202,7 @@ struct VirtualDisplayView: View {
                 return
             }
             do {
-                try await appHelper.virtualDisplay.enableDisplay(config.id)
+                try await virtualDisplay.enableDisplay(config.id)
             } catch {
                 AppErrorMapper.logFailure("Enable virtual display", error: error, logger: AppLog.virtualDisplay)
                 errorMessage = AppErrorMapper.userMessage(for: error, fallback: String(localized: "Enable failed."))
@@ -214,6 +214,9 @@ struct VirtualDisplayView: View {
 }
 
 #Preview {
+    let env = AppBootstrap.makeEnvironment(preview: true, isRunningUnderXCTestOverride: false)
     VirtualDisplayView()
-        .environment(AppHelper(preview: true))
+        .environment(env.capture)
+        .environment(env.sharing)
+        .environment(env.virtualDisplay)
 }

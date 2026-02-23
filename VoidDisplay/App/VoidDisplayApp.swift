@@ -5,56 +5,53 @@
 //
 
 import SwiftUI
-import ScreenCaptureKit
-import CoreGraphics
-import Observation
+
+@MainActor
+struct AppEnvironment {
+    let capture: CaptureController
+    let sharing: SharingController
+    let virtualDisplay: VirtualDisplayController
+}
 
 @main
 struct VoidDisplayApp: App {
-    @State private var appHelper = AppBootstrap.makeAppHelper()
+    @State private var capture: CaptureController
+    @State private var sharing: SharingController
+    @State private var virtualDisplay: VirtualDisplayController
+
+    init() {
+        let env = AppBootstrap.makeEnvironment()
+        _capture = State(initialValue: env.capture)
+        _sharing = State(initialValue: env.sharing)
+        _virtualDisplay = State(initialValue: env.virtualDisplay)
+    }
 
     var body: some Scene {
         WindowGroup {
             HomeView()
-                .environment(appHelper)
+                .environment(capture)
+                .environment(sharing)
+                .environment(virtualDisplay)
         }
 
         WindowGroup(for: UUID.self) { $sessionId in
             CaptureDisplayWindowRoot(sessionId: sessionId)
-                .environment(appHelper)
+                .environment(capture)
+                .environment(sharing)
+                .environment(virtualDisplay)
         }
 
         Settings {
             AppSettingsView()
-                .environment(appHelper)
+                .environment(capture)
+                .environment(sharing)
+                .environment(virtualDisplay)
         }
     }
 }
 
 @MainActor
-private enum AppBootstrap {
-    static func makeAppHelper() -> AppHelper {
-        guard UITestRuntime.isEnabled else {
-            return AppHelper()
-        }
-
-        let scenario = UITestRuntime.scenario
-        return AppHelper(
-            virtualDisplayService: UITestVirtualDisplayService(scenario: scenario),
-            startupPlan: .init(
-                shouldRestoreVirtualDisplays: true,
-                shouldStartWebService: false,
-                postRestoreConfiguration: { controller in
-                    controller.applyUITestPresentationState(scenario: scenario)
-                }
-            )
-        )
-    }
-}
-
-@MainActor
-@Observable
-final class AppHelper {
+enum AppBootstrap {
     private static let xCTestConfigurationEnvironmentKey = "XCTestConfigurationFilePath"
 
     struct StartupPlan {
@@ -75,40 +72,36 @@ final class AppHelper {
         )
     }
 
-    struct ScreenMonitoringSession: Identifiable {
-        enum State {
-            case starting
-            case active
+    static func makeEnvironment() -> AppEnvironment {
+        guard UITestRuntime.isEnabled else {
+            return makeEnvironment(preview: false)
         }
 
-        let id: UUID
-        let displayID: CGDirectDisplayID
-        let displayName: String
-        let resolutionText: String
-        let isVirtualDisplay: Bool
-        let stream: SCStream
-        let delegate: StreamDelegate
-        var state: State
+        let scenario = UITestRuntime.scenario
+        return makeEnvironment(
+            preview: false,
+            virtualDisplayService: UITestVirtualDisplayService(scenario: scenario),
+            startupPlan: .init(
+                shouldRestoreVirtualDisplays: true,
+                shouldStartWebService: false,
+                postRestoreConfiguration: { controller in
+                    controller.applyUITestPresentationState(scenario: scenario)
+                }
+            )
+        )
     }
 
-    typealias VirtualDisplayError = VirtualDisplayService.VirtualDisplayError
-    typealias SharePageURLFailure = SharingController.SharePageURLFailure
-
-    let capture: CaptureController
-    let sharing: SharingController
-    let virtualDisplay: VirtualDisplayController
-
-    init(
-        preview: Bool = false,
+    static func makeEnvironment(
+        preview: Bool,
         captureMonitoringService: (any CaptureMonitoringServiceProtocol)? = nil,
         sharingService: (any SharingServiceProtocol)? = nil,
         virtualDisplayService: (any VirtualDisplayServiceProtocol)? = nil,
         appliedBadgeDisplayDurationNanoseconds: UInt64 = 2_500_000_000,
         startupPlan: StartupPlan? = nil,
         isRunningUnderXCTestOverride: Bool? = nil
-    ) {
+    ) -> AppEnvironment {
         let isRunningUnderXCTest = isRunningUnderXCTestOverride
-            ?? (ProcessInfo.processInfo.environment[Self.xCTestConfigurationEnvironmentKey] != nil)
+            ?? (ProcessInfo.processInfo.environment[xCTestConfigurationEnvironmentKey] != nil)
         let resolvedStartupPlan = startupPlan ?? (isRunningUnderXCTest ? .skipAll : .standard)
         let resolvedCaptureMonitoringService = captureMonitoringService ?? CaptureMonitoringService()
         let resolvedSharingService = sharingService ?? SharingService()
@@ -116,9 +109,7 @@ final class AppHelper {
 
         let capture = CaptureController(captureMonitoringService: resolvedCaptureMonitoringService)
         let sharing = SharingController(sharingService: resolvedSharingService)
-        self.capture = capture
-        self.sharing = sharing
-        self.virtualDisplay = VirtualDisplayController(
+        let virtualDisplay = VirtualDisplayController(
             virtualDisplayService: resolvedVirtualDisplayService,
             appliedBadgeDisplayDurationNanoseconds: appliedBadgeDisplayDurationNanoseconds,
             stopDependentStreamsBeforeRebuild: { displayID in
@@ -129,11 +120,17 @@ final class AppHelper {
             }
         )
 
-        guard !preview else { return }
+        let env = AppEnvironment(
+            capture: capture,
+            sharing: sharing,
+            virtualDisplay: virtualDisplay
+        )
+
+        guard !preview else { return env }
 
         if resolvedStartupPlan.shouldStartWebService {
-            Task { [weak self] in
-                _ = await self?.sharing.startWebService()
+            Task { @MainActor in
+                _ = await sharing.startWebService()
             }
         }
 
@@ -141,19 +138,7 @@ final class AppHelper {
             virtualDisplay.loadPersistedConfigsAndRestoreDesiredVirtualDisplays()
             resolvedStartupPlan.postRestoreConfiguration?(virtualDisplay)
         }
-    }
 
-    func registerShareableDisplays(_ displays: [SCDisplay]) {
-        sharing.registerShareableDisplays(displays) { [weak self] displayID in
-            self?.virtualSerialForManagedDisplay(displayID)
-        }
-    }
-
-    func isManagedVirtualDisplay(displayID: CGDirectDisplayID) -> Bool {
-        virtualDisplay.displays.contains(where: { $0.displayID == displayID })
-    }
-
-    private func virtualSerialForManagedDisplay(_ displayID: CGDirectDisplayID) -> UInt32? {
-        virtualDisplay.displays.first(where: { $0.displayID == displayID })?.serialNum
+        return env
     }
 }

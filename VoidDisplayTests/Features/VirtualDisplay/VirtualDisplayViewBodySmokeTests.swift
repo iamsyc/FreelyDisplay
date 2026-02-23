@@ -11,41 +11,49 @@ struct VirtualDisplayViewBodySmokeTests {
     }()
 
     @Test func createVirtualDisplayBodyEvaluates() {
-        let appHelper = makeHelper(preview: true, uiTestMode: false)
+        let env = makeEnvironment(preview: true, uiTestMode: false)
         let view = CreateVirtualDisplay(isShow: .constant(true))
-            .environment(appHelper)
+            .environment(env.capture)
+            .environment(env.sharing)
+            .environment(env.virtualDisplay)
 
         render(view)
     }
 
     @Test func editVirtualDisplayBodyEvaluates() {
-        let appHelper = makeHelper(preview: false, uiTestMode: true)
-        let configID = appHelper.virtualDisplay.displayConfigs.first?.id ?? UUID()
+        let env = makeEnvironment(preview: false, uiTestMode: true)
+        let configID = env.virtualDisplay.displayConfigs.first?.id ?? UUID()
         let view = EditVirtualDisplayConfigView(configId: configID)
-            .environment(appHelper)
+            .environment(env.capture)
+            .environment(env.sharing)
+            .environment(env.virtualDisplay)
 
         render(view)
     }
 
     @Test func virtualDisplayViewBodyEvaluatesWithEmptyState() {
-        let appHelper = makeHelper(preview: true, uiTestMode: false)
+        let env = makeEnvironment(preview: true, uiTestMode: false)
         let view = VirtualDisplayView()
-            .environment(appHelper)
+            .environment(env.capture)
+            .environment(env.sharing)
+            .environment(env.virtualDisplay)
 
         render(view)
     }
 
     @Test func virtualDisplayViewBodyEvaluatesWithConfigs() {
-        let appHelper = makeHelper(preview: false, uiTestMode: true)
+        let env = makeEnvironment(preview: false, uiTestMode: true)
         let view = VirtualDisplayView()
-            .environment(appHelper)
+            .environment(env.capture)
+            .environment(env.sharing)
+            .environment(env.virtualDisplay)
 
         render(view)
     }
 
-    private func makeHelper(preview: Bool, uiTestMode: Bool) -> AppHelper {
+    private func makeEnvironment(preview: Bool, uiTestMode: Bool) -> AppEnvironment {
         if uiTestMode {
-            return AppHelper(
+            return AppBootstrap.makeEnvironment(
                 preview: preview,
                 captureMonitoringService: MockCaptureMonitoringService(),
                 sharingService: MockSharingService(),
@@ -59,7 +67,7 @@ struct VirtualDisplayViewBodySmokeTests {
             )
         }
 
-        return AppHelper(
+        return AppBootstrap.makeEnvironment(
             preview: preview,
             captureMonitoringService: MockCaptureMonitoringService(),
             sharingService: MockSharingService(),

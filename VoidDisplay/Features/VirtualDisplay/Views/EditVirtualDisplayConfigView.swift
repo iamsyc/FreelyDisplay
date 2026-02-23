@@ -4,7 +4,7 @@ import OSLog
 struct EditVirtualDisplayConfigView: View {
     let configId: UUID
 
-    @Environment(AppHelper.self) private var appHelper: AppHelper
+    @Environment(VirtualDisplayController.self) private var virtualDisplay
     @Environment(\.dismiss) private var dismiss
 
     @State private var loadedConfig: VirtualDisplayConfig?
@@ -30,7 +30,7 @@ struct EditVirtualDisplayConfigView: View {
     @State private var errorMessage = ""
 
     private var isRunning: Bool {
-        appHelper.virtualDisplay.isVirtualDisplayRunning(configId: configId)
+        virtualDisplay.isVirtualDisplayRunning(configId: configId)
     }
 
     private var trimmedName: String {
@@ -304,7 +304,7 @@ struct EditVirtualDisplayConfigView: View {
     }
 
     private func load() {
-        guard let config = appHelper.virtualDisplay.getConfig(configId) else {
+        guard let config = virtualDisplay.getConfig(configId) else {
             errorMessage = String(localized: "Display configuration not found.")
             showError = true
             return
@@ -334,7 +334,7 @@ struct EditVirtualDisplayConfigView: View {
             original: loadedConfig,
             configId: configId,
             draft: saveDraft,
-            existingConfigs: appHelper.virtualDisplay.displayConfigs,
+            existingConfigs: virtualDisplay.displayConfigs,
             isRunning: isRunning
         )
 
@@ -362,19 +362,19 @@ struct EditVirtualDisplayConfigView: View {
     }
 
     private func performSaveOnly(_ analysis: VirtualDisplayEditSaveAnalyzer.SaveAnalysis) {
-        appHelper.virtualDisplay.updateConfig(analysis.updatedConfig)
+        virtualDisplay.updateConfig(analysis.updatedConfig)
         loadedConfig = analysis.updatedConfig
         if analysis.shouldApplyModesImmediately {
-            appHelper.virtualDisplay.applyModes(configId: configId, modes: selectedModes)
+            virtualDisplay.applyModes(configId: configId, modes: selectedModes)
         }
         dismiss()
     }
 
     private func performSaveAndRebuild(_ analysis: VirtualDisplayEditSaveAnalyzer.SaveAnalysis) {
-        appHelper.virtualDisplay.updateConfig(analysis.updatedConfig)
+        virtualDisplay.updateConfig(analysis.updatedConfig)
         loadedConfig = analysis.updatedConfig
         dismiss()
-        appHelper.virtualDisplay.startRebuildFromSavedConfig(configId: configId)
+        virtualDisplay.startRebuildFromSavedConfig(configId: configId)
     }
 
     private func addPresetMode() {

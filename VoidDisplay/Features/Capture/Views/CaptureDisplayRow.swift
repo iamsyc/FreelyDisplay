@@ -68,7 +68,7 @@ struct CaptureDisplayRow: View {
 
 @MainActor
 struct MonitoringSessionRow: View {
-    let session: AppHelper.ScreenMonitoringSession
+    let session: ScreenMonitoringSession
     let onStop: () -> Void
 
     var body: some View {

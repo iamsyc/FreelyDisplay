@@ -10,7 +10,7 @@ import Observation
 @MainActor
 @Observable
 final class CaptureController {
-    var screenCaptureSessions: [AppHelper.ScreenMonitoringSession] = []
+    var screenCaptureSessions: [ScreenMonitoringSession] = []
 
     @ObservationIgnored private let captureMonitoringService: any CaptureMonitoringServiceProtocol
 
@@ -18,11 +18,11 @@ final class CaptureController {
         self.captureMonitoringService = captureMonitoringService
     }
 
-    func monitoringSession(for id: UUID) -> AppHelper.ScreenMonitoringSession? {
+    func monitoringSession(for id: UUID) -> ScreenMonitoringSession? {
         captureMonitoringService.monitoringSession(for: id)
     }
 
-    func addMonitoringSession(_ session: AppHelper.ScreenMonitoringSession) {
+    func addMonitoringSession(_ session: ScreenMonitoringSession) {
         defer { syncCaptureMonitoringState() }
         captureMonitoringService.addMonitoringSession(session)
     }

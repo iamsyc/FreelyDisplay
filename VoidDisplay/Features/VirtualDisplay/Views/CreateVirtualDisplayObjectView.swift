@@ -47,7 +47,7 @@ struct CreateVirtualDisplay: View {
     @FocusState private var focusedField: FocusField?
     
     @Binding var isShow: Bool
-    @Environment(AppHelper.self) private var appHelper: AppHelper
+    @Environment(VirtualDisplayController.self) private var virtualDisplay
 
     private func clearFocus() {
         focusedField = nil
@@ -314,7 +314,7 @@ struct CreateVirtualDisplay: View {
             let initial = CreateVirtualDisplayInputValidator.initializeNameAndSerial(
                 currentName: name,
                 baseName: baseDisplayName,
-                nextSerial: appHelper.virtualDisplay.nextAvailableSerialNumber()
+                nextSerial: virtualDisplay.nextAvailableSerialNumber()
             )
             serialNum = initial.serialNum
             name = initial.name
@@ -367,7 +367,7 @@ struct CreateVirtualDisplay: View {
         let size = physicalSize
         
         do {
-            _ = try appHelper.virtualDisplay.createDisplay(
+            _ = try virtualDisplay.createDisplay(
                 name: name,
                 serialNum: serialNum,
                 physicalSize: CGSize(width: size.width, height: size.height),
@@ -375,7 +375,7 @@ struct CreateVirtualDisplay: View {
                 modes: selectedModes
             )
             isShow = false
-        } catch let error as AppHelper.VirtualDisplayError {
+        } catch let error as VirtualDisplayService.VirtualDisplayError {
             AppErrorMapper.logFailure("Create virtual display", error: error, logger: AppLog.virtualDisplay)
             errorMessage = error.localizedDescription
             showError = true

@@ -15,15 +15,16 @@ struct ShareDisplayList: View {
     @Bindable var viewModel: ShareViewModel
     let openURLAction: OpenURLAction
 
-    @Environment(AppHelper.self) private var appHelper: AppHelper
+    @Environment(SharingController.self) private var sharing
+    @Environment(VirtualDisplayController.self) private var virtualDisplay
 
     var body: some View {
         VStack(spacing: AppUI.Spacing.small) {
             ShareStatusPanel(
                 displayCount: displays.count,
-                sharingDisplayCount: appHelper.sharing.activeSharingDisplayIDs.count,
-                clientsCount: appHelper.sharing.sharingClientCount,
-                isRunning: appHelper.sharing.isWebServiceRunning
+                sharingDisplayCount: sharing.activeSharingDisplayIDs.count,
+                clientsCount: sharing.sharingClientCount,
+                isRunning: sharing.isWebServiceRunning
             )
             .padding(.horizontal, AppUI.List.listHorizontalInset)
             .padding(.top, AppUI.Spacing.small + 2)
@@ -57,11 +58,11 @@ struct ShareDisplayList: View {
     private func shareableDisplayRow(_ display: SCDisplay) -> some View {
         let displayName = NSScreen.screens.first(where: { $0.cgDirectDisplayID == display.displayID })?.localizedName
             ?? String(localized: "Monitor")
-        let isVirtual = appHelper.isManagedVirtualDisplay(displayID: display.displayID)
-        let isSharingDisplay = appHelper.sharing.isDisplaySharing(displayID: display.displayID)
-        let displayAddress = viewModel.sharePageAddress(for: display.displayID, appHelper: appHelper)
+        let isVirtual = virtualDisplay.isManagedVirtualDisplay(displayID: display.displayID)
+        let isSharingDisplay = sharing.isDisplaySharing(displayID: display.displayID)
+        let displayAddress = viewModel.sharePageAddress(for: display.displayID, sharing: sharing)
         let displayURL = displayAddress.flatMap(URL.init(string:))
-        let displayClientCount = appHelper.sharing.sharingClientCounts[display.displayID] ?? 0
+        let displayClientCount = sharing.sharingClientCounts[display.displayID] ?? 0
         let isPrimaryDisplay = CGDisplayIsMain(display.displayID) != 0
 
         let model = AppListRowModel(
@@ -191,10 +192,10 @@ struct ShareDisplayList: View {
     private func shareActionButton(display: SCDisplay, isSharingDisplay: Bool) -> some View {
         Button {
             if isSharingDisplay {
-                viewModel.stopSharing(displayID: display.displayID, appHelper: appHelper)
+                viewModel.stopSharing(displayID: display.displayID, sharing: sharing)
             } else {
                 Task {
-                    await viewModel.startSharing(display: display, appHelper: appHelper)
+                    await viewModel.startSharing(display: display, sharing: sharing)
                 }
             }
         } label: {

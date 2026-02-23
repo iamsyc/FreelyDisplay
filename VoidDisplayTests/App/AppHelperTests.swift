@@ -3,14 +3,14 @@ import CoreGraphics
 @testable import VoidDisplay
 
 @MainActor
-struct AppHelperTests {
+struct AppBootstrapTests {
 
     @Test func initPreviewModeSkipsStartupSequence() async {
         let sharing = MockSharingService()
         let capture = MockCaptureMonitoringService()
         let virtualDisplay = MockVirtualDisplayService()
 
-        _ = AppHelper(
+        _ = AppBootstrap.makeEnvironment(
             preview: true,
             captureMonitoringService: capture,
             sharingService: sharing,
@@ -28,7 +28,7 @@ struct AppHelperTests {
         let capture = MockCaptureMonitoringService()
         let virtualDisplay = UITestVirtualDisplayService(scenario: .baseline)
 
-        let sut = AppHelper(
+        let sut = AppBootstrap.makeEnvironment(
             preview: false,
             captureMonitoringService: capture,
             sharingService: sharing,
@@ -51,7 +51,7 @@ struct AppHelperTests {
         let capture = MockCaptureMonitoringService()
         let virtualDisplay = MockVirtualDisplayService()
 
-        let sut = AppHelper(
+        let sut = AppBootstrap.makeEnvironment(
             preview: false,
             captureMonitoringService: capture,
             sharingService: sharing,
@@ -80,7 +80,7 @@ struct AppHelperTests {
         )
         virtualDisplay.currentDisplayConfigs = [fixtureConfig]
 
-        let sut = AppHelper(
+        let sut = AppBootstrap.makeEnvironment(
             preview: false,
             captureMonitoringService: capture,
             sharingService: sharing,
@@ -116,7 +116,7 @@ struct AppHelperTests {
         virtualDisplay.currentDisplayConfigs = [config]
         virtualDisplay.currentRunningConfigIds = [config.id]
 
-        let sut = AppHelper(
+        let sut = AppBootstrap.makeEnvironment(
             preview: false,
             captureMonitoringService: capture,
             sharingService: sharing,
@@ -159,7 +159,7 @@ struct AppHelperTests {
         virtualDisplay.runtimeDisplayIDByConfigId[config.id] = displayID
         sharing.activeSharingDisplayIDs = [displayID]
 
-        let sut = AppHelper(
+        let sut = AppBootstrap.makeEnvironment(
             preview: false,
             captureMonitoringService: capture,
             sharingService: sharing,
@@ -196,7 +196,7 @@ struct AppHelperTests {
         virtualDisplay.currentDisplayConfigs = [config]
         virtualDisplay.currentRunningConfigIds = [config.id]
 
-        let sut = AppHelper(
+        let sut = AppBootstrap.makeEnvironment(
             preview: false,
             captureMonitoringService: capture,
             sharingService: sharing,
@@ -235,7 +235,7 @@ struct AppHelperTests {
         virtualDisplay.currentRunningConfigIds = [config.id]
         virtualDisplay.rebuildVirtualDisplayError = NSError(domain: "test", code: 33)
 
-        let sut = AppHelper(
+        let sut = AppBootstrap.makeEnvironment(
             preview: false,
             captureMonitoringService: capture,
             sharingService: sharing,
@@ -287,7 +287,7 @@ struct AppHelperTests {
         sharing.shareTargetByDisplayID[displayID] = target
         sharing.streamClientCountsByTarget[target] = 3
 
-        let sut = AppHelper(
+        let sut = AppBootstrap.makeEnvironment(
             preview: true,
             captureMonitoringService: capture,
             sharingService: sharing,
@@ -328,7 +328,7 @@ struct AppHelperTests {
             )
         ]
 
-        let sut = AppHelper(
+        let sut = AppBootstrap.makeEnvironment(
             preview: true,
             captureMonitoringService: capture,
             sharingService: sharing,

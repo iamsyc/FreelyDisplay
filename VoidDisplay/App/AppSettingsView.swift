@@ -6,7 +6,7 @@
 import SwiftUI
 
 struct AppSettingsView: View {
-    @Environment(AppHelper.self) private var appHelper: AppHelper
+    @Environment(VirtualDisplayController.self) private var virtualDisplay
     @State private var showResetConfirmation = false
     @State private var resetCompleted = false
 
@@ -39,7 +39,7 @@ struct AppSettingsView: View {
             isPresented: $showResetConfirmation
         ) {
             Button("Reset", role: .destructive) {
-                _ = appHelper.virtualDisplay.resetVirtualDisplayData()
+                _ = virtualDisplay.resetVirtualDisplayData()
                 resetCompleted = true
             }
             Button("Cancel", role: .cancel) {}

@@ -8,13 +8,14 @@ import SwiftUI
 import ScreenCaptureKit
 
 struct IsCapturing: View {
-    @Environment(AppHelper.self) private var appHelper: AppHelper
+    @Environment(CaptureController.self) private var capture
+    @Environment(VirtualDisplayController.self) private var virtualDisplay
     @State private var viewModel = CaptureChooseViewModel()
     @Environment(\.openWindow) var openWindow
     @Environment(\.openURL) private var openURL
 
     private var shouldShowActiveSessionFallback: Bool {
-        guard !appHelper.capture.screenCaptureSessions.isEmpty else { return false }
+        guard !capture.screenCaptureSessions.isEmpty else { return false }
         if viewModel.hasScreenCapturePermission == true, let displays = viewModel.displays, !displays.isEmpty {
             return false
         }
@@ -127,9 +128,9 @@ struct IsCapturing: View {
     private var activeMonitoringSessionsFallback: some View {
         ScrollView {
             LazyVStack(spacing: AppUI.Spacing.small) {
-                ForEach(appHelper.capture.screenCaptureSessions) { session in
+                ForEach(capture.screenCaptureSessions) { session in
                     MonitoringSessionRow(session: session) {
-                        appHelper.capture.removeMonitoringSession(id: session.id)
+                        capture.removeMonitoringSession(id: session.id)
                     }
                 }
             }
@@ -142,9 +143,9 @@ struct IsCapturing: View {
     }
 
     private func captureDisplayRowComponent(_ display: SCDisplay) -> some View {
-        let isVirtualDisplay = viewModel.isVirtualDisplay(display, appHelper: appHelper)
+        let isVirtualDisplay = viewModel.isVirtualDisplay(display, virtualDisplay: virtualDisplay)
         let isPrimaryDisplay = CGDisplayIsMain(display.displayID) != 0
-        let monitoringSession = appHelper.capture.screenCaptureSessions.first(where: { $0.displayID == display.displayID })
+        let monitoringSession = capture.screenCaptureSessions.first(where: { $0.displayID == display.displayID })
         let isMonitoring = monitoringSession?.state == .active
         let isStarting = viewModel.startingDisplayIDs.contains(display.displayID) || monitoringSession?.state == .starting
 
@@ -158,12 +159,13 @@ struct IsCapturing: View {
             isStarting: isStarting
         ) {
             if isMonitoring, let session = monitoringSession {
-                appHelper.capture.removeMonitoringSession(id: session.id)
+                capture.removeMonitoringSession(id: session.id)
             } else {
                 Task {
                     await viewModel.startMonitoring(
                         display: display,
-                        appHelper: appHelper
+                        capture: capture,
+                        virtualDisplay: virtualDisplay
                     ) { sessionId in
                         openWindow(value: sessionId)
                     }
@@ -233,6 +235,9 @@ struct IsCapturing: View {
 }
 
 #Preview {
+    let env = AppBootstrap.makeEnvironment(preview: true, isRunningUnderXCTestOverride: false)
     IsCapturing()
-        .environment(AppHelper(preview: true))
+        .environment(env.capture)
+        .environment(env.sharing)
+        .environment(env.virtualDisplay)
 }

@@ -54,25 +54,49 @@ final class DisplayRebuildCoordinator {
             return
         }
 
+        let targetWasRunning = service.runningConfigIds.contains(configId)
         let runtimeSerialNum = service.activeDisplaysByConfigId[configId]?.serialNum ?? config.serialNum
-        let generationToWaitFor = service.runningConfigIds.contains(configId)
+        let generationToWaitFor = targetWasRunning
             ? service.runtimeGenerationByConfigId[configId]
             : nil
-        if service.runningConfigIds.contains(configId) {
+        if targetWasRunning {
             service.activeDisplaysByConfigId[configId] = nil
             service.runtimeDisplayIDHintsByConfigId[configId] = nil
             service.runningConfigIds.remove(configId)
             service.displays.removeAll { $0.serialNum == runtimeSerialNum }
         }
 
-        let terminationConfirmed = try await service.teardownCoordinator.settleRebuildTeardown(
-            configId: config.id,
-            serialNum: config.serialNum,
-            generationToWaitFor: generationToWaitFor,
-            rebuildTerminationTimeout: VirtualDisplayService.rebuildTerminationTimeout,
-            rebuildOfflineTimeout: VirtualDisplayService.rebuildOfflineTimeout,
-            rebuildFinalOfflineConfirmationTimeout: VirtualDisplayService.rebuildFinalOfflineConfirmationTimeout
-        )
+        let terminationConfirmed: Bool
+        if targetWasRunning,
+           !targetWasManagedMain,
+           generationToWaitFor != nil {
+            let offlineConfirmedQuick = await service.teardownCoordinator.waitForManagedDisplayOffline(
+                serialNum: runtimeSerialNum,
+                timeout: VirtualDisplayService.rebuildFleetCreationCooldownFastTeardown
+            )
+            if offlineConfirmedQuick {
+                // Offline is confirmed; proceed without the heavier settlement path.
+                terminationConfirmed = false
+            } else {
+                terminationConfirmed = try await service.teardownCoordinator.settleRebuildTeardown(
+                    configId: config.id,
+                    serialNum: runtimeSerialNum,
+                    generationToWaitFor: generationToWaitFor,
+                    rebuildTerminationTimeout: VirtualDisplayService.rebuildTerminationTimeout,
+                    rebuildOfflineTimeout: VirtualDisplayService.rebuildOfflineTimeout,
+                    rebuildFinalOfflineConfirmationTimeout: VirtualDisplayService.rebuildFinalOfflineConfirmationTimeout
+                )
+            }
+        } else {
+            terminationConfirmed = try await service.teardownCoordinator.settleRebuildTeardown(
+                configId: config.id,
+                serialNum: runtimeSerialNum,
+                generationToWaitFor: generationToWaitFor,
+                rebuildTerminationTimeout: VirtualDisplayService.rebuildTerminationTimeout,
+                rebuildOfflineTimeout: VirtualDisplayService.rebuildOfflineTimeout,
+                rebuildFinalOfflineConfirmationTimeout: VirtualDisplayService.rebuildFinalOfflineConfirmationTimeout
+            )
+        }
 
         let recreatedTargetDisplayID = try await recreateRuntimeDisplayForRebuild(
             config: config,

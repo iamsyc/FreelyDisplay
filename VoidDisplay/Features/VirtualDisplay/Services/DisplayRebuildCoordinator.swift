@@ -84,7 +84,12 @@ final class DisplayRebuildCoordinator {
         } else {
             preferredMainAfterRebuild = preferredMainDisplayID
         }
-        try await ensureHealthyTopologyAfterEnable(preferredMainDisplayID: preferredMainAfterRebuild)
+        let recoveryModeAfterRebuild: VirtualDisplayService.TopologyRecoveryMode =
+            targetWasManagedMain ? .aggressive : .fast
+        try await ensureHealthyTopologyAfterEnable(
+            preferredMainDisplayID: preferredMainAfterRebuild,
+            recoveryMode: recoveryModeAfterRebuild
+        )
     }
 
     private func shouldUseCoordinatedRebuild(

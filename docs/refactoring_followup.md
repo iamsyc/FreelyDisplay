@@ -1,5 +1,13 @@
 # VoidDisplay 重构后续修复方案
 
+## 更新摘要（2026-02-23）
+- Monitor 去重已完成：统一使用 DebouncingDisplayReconfigurationMonitor，无需重复清理。
+- 新增 DisplayRebuildCoordinator，重建/拓扑恢复从 VirtualDisplayService 拆出；服务层对外接口保持不变。
+- UI 烟测工作流改为功能失败即阻断，runner 不稳时豁免。
+- 覆盖率基线提升至 0.55，并新增 display_rebuild_coordinator 跟踪项。
+
+# VoidDisplay 重构后续修复方案
+
 > **执行者**: GPT / Codex 模型  
 > **前置条件**: 基于 `codex/refactor-start` 分支当前未提交的修改  
 > **目标**: 修复审查中发现的 3 个遗留问题

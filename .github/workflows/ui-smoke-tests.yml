@@ -25,7 +25,6 @@ concurrency:
 jobs:
   ui-smoke-tests:
     runs-on: macos-14
-    continue-on-error: true
     timeout-minutes: 20
 
     steps:
@@ -127,6 +126,11 @@ jobs:
               max_attempts: ($max_attempts | tonumber),
               log_file: $log_file
             }' > "$summary_file"
+
+          if [[ "$last_reason" == "environment_unstable" || "$last_reason" == "runner_bootstrap_failure" ]]; then
+            echo "UI smoke marked unstable (reason=${last_reason}); allowing job to pass."
+            exit 0
+          fi
 
           echo "UI smoke failed after ${max_attempts} attempts."
           exit 1

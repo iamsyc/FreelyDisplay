@@ -20,7 +20,7 @@ struct VirtualDisplayViewBodySmokeTests {
 
     @Test func editVirtualDisplayBodyEvaluates() {
         let appHelper = makeHelper(preview: false, uiTestMode: true)
-        let configID = appHelper.displayConfigs.first?.id ?? UUID()
+        let configID = appHelper.virtualDisplay.displayConfigs.first?.id ?? UUID()
         let view = EditVirtualDisplayConfigView(configId: configID)
             .environment(appHelper)
 
@@ -44,12 +44,26 @@ struct VirtualDisplayViewBodySmokeTests {
     }
 
     private func makeHelper(preview: Bool, uiTestMode: Bool) -> AppHelper {
-        AppHelper(
+        if uiTestMode {
+            return AppHelper(
+                preview: preview,
+                captureMonitoringService: MockCaptureMonitoringService(),
+                sharingService: MockSharingService(),
+                virtualDisplayService: UITestVirtualDisplayService(scenario: .baseline),
+                startupPlan: .init(
+                    shouldRestoreVirtualDisplays: true,
+                    shouldStartWebService: false,
+                    postRestoreConfiguration: nil
+                ),
+                isRunningUnderXCTestOverride: true
+            )
+        }
+
+        return AppHelper(
             preview: preview,
             captureMonitoringService: MockCaptureMonitoringService(),
             sharingService: MockSharingService(),
             virtualDisplayService: MockVirtualDisplayService(),
-            isUITestModeOverride: uiTestMode,
             isRunningUnderXCTestOverride: true
         )
     }

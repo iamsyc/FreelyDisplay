@@ -60,6 +60,8 @@ struct CaptureDisplayRow: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(isMonitoring ? .red : .accentColor)
+            .fixedSize(horizontal: true, vertical: false)
+            .layoutPriority(1)
             .disabled(isStarting)
             .accessibilityIdentifier("capture_monitor_toggle_\(display.displayID)")
         }

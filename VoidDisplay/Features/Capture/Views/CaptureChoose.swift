@@ -88,27 +88,22 @@ struct IsCapturing: View {
     // MARK: - Display List
 
     private func displayList(_ displays: [SCDisplay]) -> some View {
-        GeometryReader { geometry in
-            let useGrid = geometry.size.width > 680
-            ScrollView {
-                if useGrid {
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: AppUI.Spacing.small) {
-                        ForEach(displays, id: \.self) { display in
-                            captureDisplayRowComponent(display)
-                        }
-                    }
-                    .padding(.horizontal, AppUI.List.listHorizontalInset)
-                    .padding(.top, AppUI.Spacing.small + 2)
-                } else {
-                    LazyVStack(spacing: AppUI.List.listVerticalInset * 2) {
-                        ForEach(displays, id: \.self) { display in
-                            captureDisplayRowComponent(display)
-                        }
-                    }
-                    .padding(.horizontal, AppUI.List.listHorizontalInset)
-                    .padding(.top, AppUI.Spacing.small + 2)
+        let gridSpacing = AppUI.Spacing.small
+        // Let SwiftUI choose column count from a per-card minimum width instead of a hard cutoff.
+        let minimumAdaptiveCardWidth: CGFloat = 380
+        return ScrollView {
+            LazyVGrid(
+                columns: [
+                    GridItem(.adaptive(minimum: minimumAdaptiveCardWidth), spacing: gridSpacing, alignment: .top)
+                ],
+                spacing: gridSpacing
+            ) {
+                ForEach(displays, id: \.self) { display in
+                    captureDisplayRowComponent(display)
                 }
             }
+            .padding(.horizontal, AppUI.List.listHorizontalInset)
+            .padding(.top, AppUI.Spacing.small + 2)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: AppUI.Spacing.small + 2) {

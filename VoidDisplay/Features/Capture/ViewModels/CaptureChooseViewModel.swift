@@ -28,6 +28,9 @@ final class CaptureChooseViewModel {
     private let permissionProvider: any ScreenCapturePermissionProvider
     private let loadShareableDisplays: @Sendable () async throws -> [SCDisplay]
     private let makeScreenCaptureSession: @MainActor @Sendable (SCDisplay) async -> ScreenCaptureSession
+    @ObservationIgnored private var displayLoadTask: Task<Void, Never>?
+    @ObservationIgnored private var activeDisplayLoadRequestID: UInt64?
+    @ObservationIgnored private var nextDisplayLoadRequestID: UInt64 = 0
 
     init(
         permissionProvider: (any ScreenCapturePermissionProvider)? = nil,
@@ -73,7 +76,7 @@ final class CaptureChooseViewModel {
 
     func startMonitoring(display: SCDisplay, appHelper: AppHelper, openWindow: @escaping (UUID) -> Void) async {
         _ = await withDisplayStartLock(displayID: display.displayID) {
-            if let existingSession = appHelper.screenCaptureSessions.first(where: { $0.displayID == display.displayID }) {
+            if let existingSession = appHelper.capture.screenCaptureSessions.first(where: { $0.displayID == display.displayID }) {
                 openWindow(existingSession.id)
                 return
             }
@@ -89,7 +92,7 @@ final class CaptureChooseViewModel {
                 delegate: captureSession.delegate,
                 state: .starting
             )
-            appHelper.addMonitoringSession(session)
+            appHelper.capture.addMonitoringSession(session)
             openWindow(session.id)
         }
     }
@@ -111,8 +114,8 @@ final class CaptureChooseViewModel {
         lastPreflightPermission = preflightResult
 
         if !preflightResult {
+            cancelInFlightDisplayLoad()
             displays = nil
-            isLoadingDisplays = false
             AppLog.capture.notice("Screen capture permission request denied.")
             return
         }
@@ -124,6 +127,7 @@ final class CaptureChooseViewModel {
         hasScreenCapturePermission = granted
         lastPreflightPermission = granted
         if !granted {
+            cancelInFlightDisplayLoad()
             AppLog.capture.notice("Screen capture permission preflight denied.")
         }
         if granted {
@@ -133,31 +137,43 @@ final class CaptureChooseViewModel {
 
     func loadDisplays() {
         if UITestRuntime.isEnabled, UITestRuntime.scenario == .permissionDenied {
+            cancelInFlightDisplayLoad()
             hasScreenCapturePermission = false
             lastPreflightPermission = false
-            isLoadingDisplays = false
             displays = nil
             return
         }
 
-        guard !isLoadingDisplays else { return }
+        displayLoadTask?.cancel()
+        displayLoadTask = nil
+        let requestID = nextDisplayLoadRequestID &+ 1
+        nextDisplayLoadRequestID = requestID
+        activeDisplayLoadRequestID = requestID
         isLoadingDisplays = true
         loadErrorMessage = nil
         lastLoadError = nil
         displays = nil
 
-        Task {
+        let task = Task { [weak self] in
+            guard let self else { return }
             do {
-                let shareableDisplays = try await loadShareableDisplays()
+                let shareableDisplays = try await self.loadShareableDisplays()
                 await MainActor.run {
+                    guard self.canCommitDisplayLoadResult(requestID: requestID) else { return }
                     self.displays = shareableDisplays
                     self.hasScreenCapturePermission = true
                     self.lastPreflightPermission = true
+                    self.finishDisplayLoadRequestIfCurrent(requestID: requestID)
+                }
+            } catch is CancellationError {
+                await MainActor.run {
+                    self.finishDisplayLoadRequestIfCurrent(requestID: requestID)
                 }
             } catch {
                 let nsError = error as NSError
-                AppErrorMapper.logFailure("Load shareable displays", error: error, logger: AppLog.capture)
                 await MainActor.run {
+                    guard self.canCommitDisplayLoadResult(requestID: requestID) else { return }
+                    AppErrorMapper.logFailure("Load shareable displays", error: error, logger: AppLog.capture)
                     self.loadErrorMessage = String(localized: "Failed to load displays. Check permission and try again.")
                     self.lastLoadError = .init(
                         domain: nsError.domain,
@@ -166,11 +182,28 @@ final class CaptureChooseViewModel {
                         failureReason: nsError.localizedFailureReason,
                         recoverySuggestion: nsError.localizedRecoverySuggestion
                     )
+                    self.finishDisplayLoadRequestIfCurrent(requestID: requestID)
                 }
             }
-            await MainActor.run {
-                self.isLoadingDisplays = false
-            }
         }
+        displayLoadTask = task
+    }
+
+    func cancelInFlightDisplayLoad() {
+        displayLoadTask?.cancel()
+        displayLoadTask = nil
+        activeDisplayLoadRequestID = nil
+        isLoadingDisplays = false
+    }
+
+    private func canCommitDisplayLoadResult(requestID: UInt64) -> Bool {
+        activeDisplayLoadRequestID == requestID && !Task.isCancelled
+    }
+
+    private func finishDisplayLoadRequestIfCurrent(requestID: UInt64) {
+        guard activeDisplayLoadRequestID == requestID else { return }
+        activeDisplayLoadRequestID = nil
+        isLoadingDisplays = false
+        displayLoadTask = nil
     }
 }

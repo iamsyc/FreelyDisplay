@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   ui-smoke-tests:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 20
 
     steps:

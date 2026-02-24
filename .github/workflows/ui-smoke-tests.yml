@@ -102,7 +102,6 @@ jobs:
               -resultBundlePath UISmokeTests.xcresult \
               CODE_SIGNING_ALLOWED=NO \
               CODE_SIGNING_REQUIRED=NO \
-              OTHER_SWIFT_FLAGS='$(inherited) -enable-experimental-feature IsolatedDeinit' \
               test \
               -only-testing:VoidDisplayUITests/HomeSmokeTests/testHomeNavigationSmoke_baseline \
               2>&1 | tee "$log_file"

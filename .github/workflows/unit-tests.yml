@@ -51,7 +51,6 @@ jobs:
       - name: Run unit tests (no signing)
         run: |
           chmod +x scripts/test/unit_gate.sh scripts/test/coverage_report.sh scripts/test/coverage_guard.sh
-          export EXTRA_OTHER_SWIFT_FLAGS='$(inherited) -enable-experimental-feature IsolatedDeinit'
           scripts/test/unit_gate.sh \
             --project "$GITHUB_WORKSPACE/VoidDisplay.xcodeproj" \
             --destination 'platform=macOS,arch=arm64' \

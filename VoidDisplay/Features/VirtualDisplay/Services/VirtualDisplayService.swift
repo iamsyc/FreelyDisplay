@@ -919,10 +919,12 @@ final class VirtualDisplayService {
         return "main=\(snapshot.mainDisplayID) displays=[\(displaysDescription.joined(separator: ", "))]"
     }
 
-    isolated deinit {
-        teardownCoordinator.cancelAllTerminationWaiters()
-        teardownCoordinator.cancelAllOfflineWaiters()
-        displayReconfigurationMonitor.stop()
+    deinit {
+        MainActor.assumeIsolated {
+            teardownCoordinator.cancelAllTerminationWaiters()
+            teardownCoordinator.cancelAllOfflineWaiters()
+            displayReconfigurationMonitor.stop()
+        }
     }
 
     func replaceDisplayConfigs(_ configs: [VirtualDisplayConfig]) {
